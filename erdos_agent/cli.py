@@ -5,8 +5,10 @@ import sys
 from pathlib import Path
 
 from .core import (
+    PROBLEMS_YAML_URL,
     create_problem,
     ensure_workspace,
+    ingest_github_problems,
     load_problem,
     make_blind_packet,
     make_claim_card,
@@ -14,6 +16,7 @@ from .core import (
     make_statement_audit,
     normalize_problem_id,
     score_problem,
+    triage_all,
     write_json,
     write_text,
 )
@@ -45,6 +48,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     triage_parser = subparsers.add_parser("triage", help="Score one local problem.")
     triage_parser.add_argument("problem_id")
+
+    ingest_parser = subparsers.add_parser("ingest-github", help="Import teorth/erdosproblems metadata.")
+    ingest_parser.add_argument("--url", default=PROBLEMS_YAML_URL)
+    ingest_parser.add_argument("--limit", type=int, help="Maximum number of selected records to import.")
+    ingest_parser.add_argument("--status", action="append", default=[], help="Repeatable status filter, e.g. open.")
+    ingest_parser.add_argument("--fetch-statements", action="store_true", help="Also fetch statement text from erdosproblems.com/latex/<n>.")
+    ingest_parser.add_argument("--overwrite", action="store_true", help="Overwrite existing fetched/manual statement text when fetching statements.")
+
+    triage_all_parser = subparsers.add_parser("triage-all", help="Score and rank local problems.")
+    triage_all_parser.add_argument("--status", action="append", default=["open"], help="Repeatable status filter. Use 'all' to disable filtering.")
+    triage_all_parser.add_argument("--limit", type=int, default=30, help="Number of ranked items to include. Use 0 for all.")
 
     redact_parser = subparsers.add_parser("redact", help="Generate a blind solver packet.")
     redact_parser.add_argument("problem_id")
@@ -93,6 +107,14 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "triage":
             run_triage(root, args.problem_id)
+            return 0
+
+        if args.command == "ingest-github":
+            run_ingest_github(root, args)
+            return 0
+
+        if args.command == "triage-all":
+            run_triage_all(root, args)
             return 0
 
         if args.command == "redact":
@@ -144,6 +166,40 @@ def run_triage(root: Path, problem_id: str) -> None:
     print(f"Recommended next action: {score['recommended_next_action']}")
 
 
+def run_ingest_github(root: Path, args: argparse.Namespace) -> None:
+    summary = ingest_github_problems(
+        root,
+        source_url=args.url,
+        limit=args.limit,
+        status_filter=parse_status_filter(args.status),
+        fetch_statements=args.fetch_statements,
+        overwrite=args.overwrite,
+    )
+    print(f"Imported {summary['written']} problems from {summary['source_url']}")
+    if summary["errors"]:
+        print(f"Statement fetch errors: {len(summary['errors'])}")
+
+
+def run_triage_all(root: Path, args: argparse.Namespace) -> None:
+    limit = None if args.limit == 0 else args.limit
+    index = triage_all(root, status_filter=parse_status_filter(args.status), limit=limit)
+    print(f"Wrote {root / 'reports' / 'triage' / 'index.json'}")
+    print(f"Ranked {index['returned']} of {index['considered']} considered problems")
+    for item in index["items"][:10]:
+        statement_mark = "statement" if item["statement_present"] else "no-statement"
+        print(
+            f"{item['problem_id']} score={item['priority_score']} "
+            f"next={item['recommended_next_action']} {statement_mark}"
+        )
+
+
+def parse_status_filter(values: list[str]) -> set[str] | None:
+    cleaned = {value.strip().lower() for value in values if value.strip()}
+    if not cleaned or "all" in cleaned:
+        return None
+    return cleaned
+
+
 def run_redact(root: Path, problem_id: str) -> str:
     problem = load_problem(root, problem_id)
     task_id, content, manifest = make_blind_packet(problem)
@@ -187,4 +243,3 @@ def run_claim_card(root: Path, problem_id: str, *, task_id: str | None = None) -
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import re
 from dataclasses import dataclass
 from datetime import date
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from urllib.request import Request, urlopen
+
+
+PROBLEMS_YAML_URL = "https://raw.githubusercontent.com/teorth/erdosproblems/main/data/problems.yaml"
+ERDOS_PROBLEMS_BASE_URL = "https://www.erdosproblems.com"
 
 
 DEFAULT_DIRS = [
@@ -141,6 +148,18 @@ def write_text(path: Path, content: str) -> WriteResult:
     return WriteResult(path=path, content=content)
 
 
+def fetch_text(url: str, *, timeout: int = 30) -> str:
+    request = Request(
+        url,
+        headers={
+            "User-Agent": "erdos-agent/0.1 (+https://github.com/sann-ai/erdos-agent)",
+        },
+    )
+    with urlopen(request, timeout=timeout) as response:
+        charset = response.headers.get_content_charset() or "utf-8"
+        return response.read().decode(charset)
+
+
 def create_problem(
     root: Path,
     number: int,
@@ -182,6 +201,270 @@ def load_problem(root: Path, problem_id: str | int) -> dict[str, Any]:
     return read_json(path)
 
 
+def list_problem_paths(root: Path) -> list[Path]:
+    return sorted((root / "data" / "problems").glob("ep*.json"))
+
+
+def ingest_github_problems(
+    root: Path,
+    *,
+    yaml_text: str | None = None,
+    source_url: str = PROBLEMS_YAML_URL,
+    limit: int | None = None,
+    status_filter: set[str] | None = None,
+    fetch_statements: bool = False,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    if yaml_text is None:
+        yaml_text = fetch_text(source_url)
+    write_text(root / "data" / "raw" / "problems.yaml", yaml_text)
+
+    records = parse_github_problems_yaml(yaml_text)
+    written: list[str] = []
+    skipped: list[str] = []
+    errors: list[dict[str, str]] = []
+    selected = 0
+
+    for record in records:
+        status = nested_state(record, "status", default="unknown").lower()
+        if status_filter and status not in status_filter:
+            continue
+        selected += 1
+        if limit is not None and selected > limit:
+            break
+
+        problem_id = normalize_problem_id(record["number"])
+        existing = read_json(problem_path(root, problem_id)) if problem_path(root, problem_id).exists() else None
+        statement = ""
+        if fetch_statements:
+            try:
+                statement = fetch_problem_statement(int(record["number"]))
+            except Exception as exc:
+                errors.append({"problem_id": problem_id, "error": str(exc)})
+
+        payload = github_record_to_problem(
+            record,
+            existing=existing,
+            statement=statement,
+            overwrite=overwrite,
+            source_url=source_url,
+        )
+        write_json(root / "data" / "problems" / f"{problem_id}.json", payload)
+        written.append(problem_id)
+
+    summary = {
+        "source_url": source_url,
+        "records_seen": len(records),
+        "written": len(written),
+        "skipped": len(skipped),
+        "errors": errors,
+        "fetch_statements": fetch_statements,
+        "status_filter": sorted(status_filter) if status_filter else [],
+        "last_checked": date.today().isoformat(),
+    }
+    write_json(root / "data" / "raw" / "ingest_summary.json", summary)
+    return summary
+
+
+def parse_github_problems_yaml(yaml_text: str) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    section: str | None = None
+
+    for raw_line in yaml_text.splitlines():
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+            continue
+
+        if raw_line.startswith("- "):
+            if current is not None:
+                records.append(current)
+            current = {}
+            section = None
+            remainder = raw_line[2:].strip()
+            if remainder:
+                key, value = parse_yaml_key_value(remainder)
+                current[key] = parse_yaml_value(value)
+            continue
+
+        if current is None:
+            continue
+
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        line = raw_line.strip()
+        if indent == 2:
+            key, value = parse_yaml_key_value(line)
+            if value == "":
+                current[key] = {}
+                section = key
+            else:
+                current[key] = parse_yaml_value(value)
+                section = None
+        elif indent == 4 and section:
+            key, value = parse_yaml_key_value(line)
+            section_payload = current.setdefault(section, {})
+            if isinstance(section_payload, dict):
+                section_payload[key] = parse_yaml_value(value)
+
+    if current is not None:
+        records.append(current)
+    return records
+
+
+def parse_yaml_key_value(line: str) -> tuple[str, str]:
+    if ":" not in line:
+        raise ValueError(f"Expected key: value line, got: {line!r}")
+    key, value = line.split(":", 1)
+    return key.strip(), value.strip()
+
+
+def parse_yaml_value(value: str) -> Any:
+    if value == "":
+        return ""
+    if value in {"null", "Null", "NULL", "~"}:
+        return None
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        pass
+    if value.startswith("[") and value.endswith("]"):
+        return [part.strip().strip('"').strip("'") for part in value[1:-1].split(",") if part.strip()]
+    if value.isdigit():
+        return int(value)
+    return value.strip('"').strip("'")
+
+
+def github_record_to_problem(
+    record: dict[str, Any],
+    *,
+    existing: dict[str, Any] | None = None,
+    statement: str = "",
+    overwrite: bool = False,
+    source_url: str = PROBLEMS_YAML_URL,
+) -> dict[str, Any]:
+    number = int(record["number"])
+    problem_id = normalize_problem_id(number)
+    status = nested_state(record, "status", default="unknown")
+    formalized = nested_state(record, "formalized", default="unknown")
+    existing = existing or {}
+    existing_statement = existing.get("statement_raw", "")
+    statement_raw = statement.strip() if statement.strip() and (overwrite or not existing_statement) else existing_statement
+    statement_source = "site_latex" if statement.strip() and (overwrite or not existing_statement) else existing.get("statement_source", "not_fetched")
+    prize = normalize_prize(record.get("prize"))
+
+    return {
+        "number": number,
+        "problem_id": problem_id,
+        "title": existing.get("title", ""),
+        "url": f"{ERDOS_PROBLEMS_BASE_URL}/{number}",
+        "status_site": status,
+        "status_local": existing.get("status_local", "not_started"),
+        "tags": ensure_list(record.get("tags")),
+        "prize": prize,
+        "oeis": ensure_list(record.get("oeis")),
+        "formalized": record.get("formalized", {}),
+        "statement_raw": statement_raw,
+        "statement_latex": existing.get("statement_latex", ""),
+        "statement_source": statement_source,
+        "known_references": existing.get("known_references", []),
+        "comments_summary": existing.get("comments_summary", []),
+        "literature_status": existing.get("literature_status", "not_started"),
+        "statement_risk": existing.get("statement_risk", "unknown"),
+        "formalization_status": formalized,
+        "attempts": existing.get("attempts", []),
+        "review_labels": existing.get("review_labels", []),
+        "source_metadata": {
+            "github_yaml_url": source_url,
+            "github_record": record,
+        },
+        "last_checked": date.today().isoformat(),
+    }
+
+
+def nested_state(record: dict[str, Any], key: str, *, default: str) -> str:
+    value = record.get(key)
+    if isinstance(value, dict):
+        return str(value.get("state", default))
+    if value is None:
+        return default
+    return str(value)
+
+
+def normalize_prize(prize: Any) -> str | None:
+    if prize is None:
+        return None
+    prize_text = str(prize).strip()
+    if prize_text.lower() in {"", "no", "none", "n/a"}:
+        return None
+    return prize_text
+
+
+def ensure_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def fetch_problem_statement(number: int) -> str:
+    html_text = fetch_text(f"{ERDOS_PROBLEMS_BASE_URL}/latex/{number}")
+    statement = extract_problem_statement_from_html(html_text)
+    if not statement:
+        raise ValueError(f"Could not extract statement for problem {number}")
+    return statement
+
+
+def extract_problem_statement_from_html(html_text: str) -> str:
+    parser = FirstClassDivTextParser("problem-text")
+    parser.feed(html_text)
+    return clean_html_text(parser.text)
+
+
+class FirstClassDivTextParser(HTMLParser):
+    def __init__(self, class_name: str) -> None:
+        super().__init__()
+        self.class_name = class_name
+        self.depth = 0
+        self.capturing = False
+        self.parts: list[str] = []
+
+    @property
+    def text(self) -> str:
+        return "".join(self.parts)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self.capturing:
+            if tag == "br":
+                self.parts.append("\n")
+                return
+            self.depth += 1
+            return
+        if tag != "div":
+            return
+        attrs_dict = {key: value or "" for key, value in attrs}
+        classes = attrs_dict.get("class", "").split()
+        if self.class_name in classes:
+            self.capturing = True
+            self.depth = 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if not self.capturing:
+            return
+        self.depth -= 1
+        if self.depth <= 0:
+            self.capturing = False
+
+    def handle_data(self, data: str) -> None:
+        if self.capturing:
+            self.parts.append(data)
+
+
+def clean_html_text(text: str) -> str:
+    unescaped = html.unescape(text)
+    lines = [re.sub(r"\s+", " ", line).strip() for line in unescaped.splitlines()]
+    return "\n".join(line for line in lines if line).strip()
+
+
 def task_id_for_statement(statement: str) -> str:
     digest = hashlib.sha256(statement.strip().encode("utf-8")).hexdigest()[:12]
     return f"math-task-{digest}"
@@ -198,6 +481,9 @@ def redaction_leaks(text: str) -> list[str]:
 
 def make_blind_packet(problem: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
     statement = problem.get("statement_raw") or problem.get("statement_latex") or ""
+    if not statement.strip():
+        problem_id = problem.get("problem_id") or normalize_problem_id(problem["number"])
+        raise ValueError(f"{problem_id} has no statement text; fetch or add a statement before redaction.")
     task_id = task_id_for_statement(statement)
     leaks = redaction_leaks(statement)
     content = f"""# Mathematical Task {task_id}
@@ -252,6 +538,9 @@ Return the result in these sections:
 
 def make_literature_packet(problem: dict[str, Any]) -> tuple[str, str]:
     statement = problem.get("statement_raw") or problem.get("statement_latex") or ""
+    if not statement.strip():
+        problem_id = problem.get("problem_id") or normalize_problem_id(problem["number"])
+        raise ValueError(f"{problem_id} has no statement text; fetch or add a statement before literature packets.")
     task_id = task_id_for_statement(statement)
     keywords = extract_keywords(statement)
     content = f"""# Anonymous Literature Search Packet {task_id}
@@ -318,12 +607,23 @@ def score_problem(problem: dict[str, Any]) -> dict[str, Any]:
     tags = [str(tag).lower() for tag in problem.get("tags", [])]
     references = problem.get("known_references") or []
     comments = problem.get("comments_summary") or []
+    oeis = [str(item).lower() for item in problem.get("oeis", [])]
+    formalization_status = str(problem.get("formalization_status") or "").lower()
+    has_statement = bool(statement.strip())
 
     checkability = bounded_score(count_terms(statement, FINITE_SEARCH_TERMS) + count_terms(statement, FORMALIZATION_TERMS), 0, 5)
     literature_gap = 3 if len(references) == 0 else 2 if len(references) <= 2 else 1 if len(references) <= 5 else 0
     statement_ambiguity = bounded_score(count_terms(statement, AMBIGUITY_TERMS), 0, 4)
     finite_searchability = bounded_score(count_terms(statement, FINITE_SEARCH_TERMS), 0, 4)
     formalization_readiness = estimate_formalization_readiness(statement, statement_ambiguity)
+    if any(item.startswith("a") or item == "possible" for item in oeis):
+        finite_searchability = bounded_score(finite_searchability + 1, 0, 4)
+        checkability = bounded_score(checkability + 1, 0, 5)
+    if formalization_status == "yes":
+        formalization_readiness = bounded_score(formalization_readiness + 2, 0, 4)
+        checkability = bounded_score(checkability + 1, 0, 5)
+    elif formalization_status == "no" and has_statement:
+        formalization_readiness = bounded_score(formalization_readiness + 1, 0, 4)
     forum_activity = 2 if len(comments) >= 5 else 1 if comments else 0
     domain_fit = 1
     famous_acorn_risk = 2 if problem.get("prize") else 0
@@ -358,12 +658,63 @@ def score_problem(problem: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "problem_id": problem.get("problem_id") or normalize_problem_id(problem["number"]),
+        "number": int(problem["number"]),
+        "status_site": problem.get("status_site", "unknown"),
+        "statement_present": has_statement,
         "priority_score": priority_score,
         "components": components,
         "recommended_next_action": recommend_next_action(components),
         "caveats": make_triage_caveats(problem, components),
         "generated_at": date.today().isoformat(),
     }
+
+
+def triage_all(
+    root: Path,
+    *,
+    status_filter: set[str] | None = None,
+    limit: int | None = 30,
+) -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    considered = 0
+
+    for path in list_problem_paths(root):
+        problem = read_json(path)
+        status = str(problem.get("status_site", "unknown")).lower()
+        if status_filter and status not in status_filter:
+            continue
+        considered += 1
+        score = score_problem(problem)
+        write_json(root / "reports" / "triage" / f"{score['problem_id']}.json", score)
+        items.append(
+            {
+                "problem_id": score["problem_id"],
+                "number": score["number"],
+                "status_site": score["status_site"],
+                "url": problem.get("url", ""),
+                "tags": problem.get("tags", []),
+                "prize": problem.get("prize"),
+                "oeis": problem.get("oeis", []),
+                "formalization_status": problem.get("formalization_status", "unknown"),
+                "statement_present": score["statement_present"],
+                "priority_score": score["priority_score"],
+                "recommended_next_action": score["recommended_next_action"],
+                "components": score["components"],
+                "caveats": score["caveats"],
+            }
+        )
+
+    items.sort(key=lambda item: (-item["priority_score"], item["number"]))
+    ranked_items = items if limit is None else items[:limit]
+    index = {
+        "generated_at": date.today().isoformat(),
+        "status_filter": sorted(status_filter) if status_filter else [],
+        "considered": considered,
+        "returned": len(ranked_items),
+        "items": ranked_items,
+    }
+    write_json(root / "reports" / "triage" / "index.json", index)
+    return index
 
 
 def count_terms(text: str, terms: list[str]) -> int:
@@ -400,6 +751,8 @@ def recommend_next_action(components: dict[str, int]) -> str:
 
 def make_triage_caveats(problem: dict[str, Any], components: dict[str, int]) -> list[str]:
     caveats: list[str] = []
+    if not (problem.get("statement_raw") or problem.get("statement_latex")):
+        caveats.append("statement is not fetched yet; run ingest-github with --fetch-statements or add it manually before solver use.")
     if components["literature_gap"] >= 2:
         caveats.append("known_references is sparse; do not make novelty claims before a real literature pass.")
     if components["statement_ambiguity"] >= 2:
@@ -510,4 +863,3 @@ TODO
 
 do_not_post / ask_expert / post_comment / prepare_pdf / submit_pr
 """
-

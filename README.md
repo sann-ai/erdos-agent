@@ -45,6 +45,47 @@ reports/statement_audits/ep0728.md
 reports/attempts/ep0728.claim.md
 ```
 
+## 公式GitHubデータを取り込む
+
+まずメタデータだけ取り込む場合:
+
+```bash
+python3 -m erdos_agent ingest-github
+```
+
+open扱いの問題だけ取り込む場合:
+
+```bash
+python3 -m erdos_agent ingest-github --status open
+```
+
+最初の数件だけ、公式ページのLaTeX表示からstatementも取る場合:
+
+```bash
+python3 -m erdos_agent ingest-github --status open --limit 5 --fetch-statements
+```
+
+`--fetch-statements` は `https://www.erdosproblems.com/latex/<番号>` にアクセスします。全件取得はサイトへ連続アクセスするため、必要な範囲に絞って使う想定です。
+
+## 複数問題をtriageする
+
+```bash
+python3 -m erdos_agent triage-all --status open --limit 30
+```
+
+生成物:
+
+```text
+reports/triage/index.json
+reports/triage/epNNNN.json
+```
+
+`triage-all` はデフォルトでopen問題だけを見ます。全ステータスを見る場合:
+
+```bash
+python3 -m erdos_agent triage-all --status all --limit 50
+```
+
 ## 推奨運用
 
 1. `pipeline` で匿名化パケットとtriageを作る
@@ -58,4 +99,4 @@ reports/attempts/ep0728.claim.md
 
 ## 現時点のスコープ
 
-このMVPはOpenAI APIやLeanをまだ直接呼びません。まず情報隔離と成果物の形を固定するための土台です。
+このMVPはOpenAI APIやLeanをまだ直接呼びません。まず情報隔離、公式メタデータ取り込み、triageランキング、成果物の形を固定するための土台です。
