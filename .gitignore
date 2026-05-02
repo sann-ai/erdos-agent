@@ -9,3 +9,9 @@ build/
 dist/
 *.egg-info/
 
+# Generated research artifacts. Commit individual files intentionally if needed.
+data/
+reports/
+packets/
+agent_runs/
+kb/

@@ -8,6 +8,7 @@ from .core import (
     PROBLEMS_YAML_URL,
     create_problem,
     ensure_workspace,
+    find_similar_problems,
     ingest_github_problems,
     load_problem,
     make_blind_packet,
@@ -15,6 +16,9 @@ from .core import (
     make_literature_packet,
     make_statement_audit,
     normalize_problem_id,
+    pivot_from_literature_finding,
+    record_literature_finding,
+    record_math_example,
     score_problem,
     triage_all,
     write_json,
@@ -59,6 +63,35 @@ def build_parser() -> argparse.ArgumentParser:
     triage_all_parser = subparsers.add_parser("triage-all", help="Score and rank local problems.")
     triage_all_parser.add_argument("--status", action="append", default=["open"], help="Repeatable status filter. Use 'all' to disable filtering.")
     triage_all_parser.add_argument("--limit", type=int, default=30, help="Number of ranked items to include. Use 0 for all.")
+
+    transfer_parser = subparsers.add_parser("transfer-search", help="Find open problems similar to a solved or promising seed problem.")
+    transfer_parser.add_argument("seed_problem_id")
+    transfer_parser.add_argument("--status", action="append", default=["open"], help="Repeatable status filter for target problems. Use 'all' to disable filtering.")
+    transfer_parser.add_argument("--limit", type=int, default=20)
+
+    finding_parser = subparsers.add_parser("add-finding", help="Record a literature finding and add it to the wiki layer.")
+    finding_parser.add_argument("problem_id")
+    finding_parser.add_argument("--paper-key", required=True)
+    finding_parser.add_argument("--title", required=True)
+    finding_parser.add_argument("--url", default="")
+    finding_parser.add_argument("--summary", default="")
+    finding_parser.add_argument("--method-tag", action="append", default=[])
+    finding_parser.add_argument("--example", action="append", default=[])
+    finding_parser.add_argument("--relevance", type=int, default=3)
+
+    pivot_parser = subparsers.add_parser("pivot-from-finding", help="Suggest open problems to pivot to from a literature finding.")
+    pivot_parser.add_argument("finding_id")
+    pivot_parser.add_argument("--status", action="append", default=["open"])
+    pivot_parser.add_argument("--limit", type=int, default=20)
+
+    example_parser = subparsers.add_parser("add-example", help="Store a mathematical example in the knowledge base.")
+    example_parser.add_argument("example_id")
+    example_parser.add_argument("--statement", help="Example statement.")
+    example_parser.add_argument("--statement-file", help="Path to a file containing the example statement.")
+    example_parser.add_argument("--source", default="")
+    example_parser.add_argument("--problem-id")
+    example_parser.add_argument("--tag", action="append", default=[])
+    example_parser.add_argument("--role", default="example")
 
     redact_parser = subparsers.add_parser("redact", help="Generate a blind solver packet.")
     redact_parser.add_argument("problem_id")
@@ -115,6 +148,22 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "triage-all":
             run_triage_all(root, args)
+            return 0
+
+        if args.command == "transfer-search":
+            run_transfer_search(root, args)
+            return 0
+
+        if args.command == "add-finding":
+            run_add_finding(root, args)
+            return 0
+
+        if args.command == "pivot-from-finding":
+            run_pivot_from_finding(root, args)
+            return 0
+
+        if args.command == "add-example":
+            run_add_example(root, args)
             return 0
 
         if args.command == "redact":
@@ -198,6 +247,72 @@ def parse_status_filter(values: list[str]) -> set[str] | None:
     if not cleaned or "all" in cleaned:
         return None
     return cleaned
+
+
+def run_transfer_search(root: Path, args: argparse.Namespace) -> None:
+    result = find_similar_problems(
+        root,
+        args.seed_problem_id,
+        status_filter=parse_status_filter(args.status),
+        limit=args.limit,
+    )
+    path = root / "reports" / "analogies" / f"{result['seed_problem_id']}.json"
+    print(f"Wrote {path}")
+    print(f"Found {result['returned']} similar problems")
+    for item in result["items"][:10]:
+        print(
+            f"{item['problem_id']} similarity={item['similarity_score']} "
+            f"next={item['recommended_next_action']}"
+        )
+
+
+def run_add_finding(root: Path, args: argparse.Namespace) -> None:
+    finding = record_literature_finding(
+        root,
+        problem_id=args.problem_id,
+        paper_key=args.paper_key,
+        title=args.title,
+        url=args.url,
+        summary=args.summary,
+        method_tags=args.method_tag,
+        examples=args.example,
+        relevance=args.relevance,
+    )
+    path = root / "reports" / "literature" / "findings" / f"{finding['finding_id']}.json"
+    print(f"Wrote {path}")
+    print(f"Finding id: {finding['finding_id']}")
+
+
+def run_pivot_from_finding(root: Path, args: argparse.Namespace) -> None:
+    result = pivot_from_literature_finding(
+        root,
+        args.finding_id,
+        status_filter=parse_status_filter(args.status),
+        limit=args.limit,
+    )
+    path = root / "reports" / "pivots" / f"{args.finding_id}.json"
+    print(f"Wrote {path}")
+    print(f"Found {result['returned']} pivot candidates")
+    for item in result["items"][:10]:
+        print(
+            f"{item['problem_id']} pivot={item['pivot_score']} "
+            f"next={item['recommended_next_action']}"
+        )
+
+
+def run_add_example(root: Path, args: argparse.Namespace) -> None:
+    statement = read_statement_arg(args.statement, args.statement_file)
+    payload = record_math_example(
+        root,
+        example_id=args.example_id,
+        statement=statement,
+        source=args.source,
+        problem_id=args.problem_id,
+        tags=args.tag,
+        role=args.role,
+    )
+    path = root / "kb" / "examples" / f"{payload['example_id']}.json"
+    print(f"Wrote {path}")
 
 
 def run_redact(root: Path, problem_id: str) -> str:

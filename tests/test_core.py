@@ -1,12 +1,21 @@
 import unittest
+from tempfile import TemporaryDirectory
+from pathlib import Path
 
 from erdos_agent.core import (
+    ensure_workspace,
+    extract_problem_content_from_html,
     extract_problem_statement_from_html,
     github_record_to_problem,
     make_blind_packet,
     normalize_problem_id,
     parse_github_problems_yaml,
+    pivot_from_literature_finding,
+    record_literature_finding,
+    record_math_example,
     score_problem,
+    similarity_score,
+    write_json,
 )
 
 
@@ -71,12 +80,21 @@ class CoreTests(unittest.TestCase):
             "oeis": ["A276661"],
             "tags": ["number theory"],
         }
-        problem = github_record_to_problem(record, statement="Let n be a natural number.")
+        problem = github_record_to_problem(
+            record,
+            page_data={
+                "statement": "Let n be a natural number.",
+                "remarks": "Known small cases are easy.",
+                "references": ["[Ab24] A. Author, A title."],
+            },
+        )
         self.assertEqual(problem["problem_id"], "ep0001")
         self.assertEqual(problem["status_site"], "open")
         self.assertIsNone(problem["prize"])
         self.assertEqual(problem["formalization_status"], "yes")
         self.assertEqual(problem["statement_source"], "site_latex")
+        self.assertEqual(problem["remarks_raw"], "Known small cases are easy.")
+        self.assertEqual(problem["known_references"], ["[Ab24] A. Author, A title."])
 
     def test_extract_problem_statement_from_html(self):
         html = """
@@ -90,6 +108,98 @@ class CoreTests(unittest.TestCase):
         statement = extract_problem_statement_from_html(html)
         self.assertIn("If $A\\subseteq", statement)
         self.assertNotIn("Remarks", statement)
+
+    def test_extract_problem_content_from_html(self):
+        html = """
+<div class="problem-box">
+  <div class="problem-text"><div id="content">Statement text.</div></div>
+  <div class="problem-additional-text">Remark one.<br><br>Remark two.</div>
+  <div class="problem-additional-text">
+    <h3>References</h3>
+    [Ab24] A. Author, <i>A title</i>.
+    [Cd25] C. D. Writer, Another title.
+  </div>
+  <div class="problem-additional-text"><a href="/1">Back to the problem</a></div>
+</div>
+"""
+        content = extract_problem_content_from_html(html)
+        self.assertEqual(content["statement"], "Statement text.")
+        self.assertIn("Remark one.", content["remarks"])
+        self.assertEqual(len(content["references"]), 2)
+        self.assertTrue(content["references"][0].startswith("[Ab24]"))
+
+    def test_similarity_score_uses_tags_terms_and_references(self):
+        seed = {
+            "tags": ["number theory", "primes"],
+            "statement_raw": "Every large integer is a sum of a prime and powers of two.",
+            "remarks_raw": "Uses additive basis methods.",
+            "known_references": ["[Ab24] A. Author, A title."],
+            "oeis": ["A000001"],
+            "formalization_status": "yes",
+        }
+        candidate = {
+            "tags": ["number theory", "additive basis"],
+            "statement_raw": "Is every large integer a sum of primes and powers?",
+            "remarks_raw": "Related additive basis question.",
+            "known_references": ["[Ab24] A. Author, A title."],
+            "oeis": ["A000001"],
+            "formalization_status": "yes",
+        }
+        score, rationale = similarity_score(seed, candidate)
+        self.assertGreater(score, 10)
+        self.assertTrue(any("shared tags" in item for item in rationale))
+        self.assertTrue(any("shared references" in item for item in rationale))
+
+    def test_literature_finding_can_pivot(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "data/problems/ep0001.json",
+                {
+                    "number": 1,
+                    "problem_id": "ep0001",
+                    "status_site": "solved",
+                    "tags": ["number theory", "primes"],
+                    "statement_raw": "Every large integer is a sum of a prime and powers of two.",
+                    "known_references": [],
+                },
+            )
+            write_json(
+                root / "data/problems/ep0002.json",
+                {
+                    "number": 2,
+                    "problem_id": "ep0002",
+                    "status_site": "open",
+                    "tags": ["number theory", "additive basis"],
+                    "statement_raw": "Can every large integer be represented using a prime and a small additive basis?",
+                    "known_references": [],
+                },
+            )
+            finding = record_literature_finding(
+                root,
+                problem_id=1,
+                paper_key="Ab24",
+                title="A prime additive basis method",
+                summary="Uses primes and additive basis constructions.",
+                method_tags=["additive basis"],
+                examples=["A small additive basis construction."],
+            )
+            result = pivot_from_literature_finding(root, finding["finding_id"], status_filter={"open"})
+            self.assertEqual(result["items"][0]["problem_id"], "ep0002")
+
+    def test_record_math_example(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            payload = record_math_example(
+                root,
+                example_id="Toy Example",
+                statement="The powers of two have distinct subset sums.",
+                tags=["subset sums"],
+            )
+            self.assertEqual(payload["example_id"], "toy-example")
+            self.assertTrue((root / "kb/examples/toy-example.md").exists())
 
 
 if __name__ == "__main__":

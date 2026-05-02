@@ -23,12 +23,24 @@ DEFAULT_DIRS = [
     "data/manifests",
     "notes",
     "reports/triage",
+    "reports/analogies",
     "reports/literature",
+    "reports/literature/findings",
+    "reports/pivots",
     "reports/statement_audits",
     "reports/attempts",
     "reports/referee",
     "packets/blind",
     "packets/literature",
+    "agent_runs",
+    "agent_runs/inbox",
+    "agent_runs/outbox",
+    "kb/raw/papers",
+    "kb/wiki/problems",
+    "kb/wiki/papers",
+    "kb/wiki/methods",
+    "kb/examples",
+    "kb/method_cards",
     "computations",
     "lean",
 ]
@@ -114,6 +126,30 @@ class WriteResult:
 def ensure_workspace(root: Path) -> None:
     for directory in DEFAULT_DIRS:
         (root / directory).mkdir(parents=True, exist_ok=True)
+    ensure_seed_file(root / "kb" / "index.md", "# Knowledge Base Index\n\n")
+    ensure_seed_file(root / "kb" / "log.md", "# Knowledge Base Log\n\n")
+    ensure_seed_file(
+        root / "kb" / "schema.md",
+        """# Knowledge Base Schema
+
+This knowledge base follows a compiled-wiki pattern:
+
+- `raw/`: immutable source material.
+- `wiki/`: maintained markdown summaries and cross-links.
+- `examples/`: mathematical examples, constructions, counterexamples, and small cases.
+- `method_cards/`: reusable proof/computation/formalization patterns.
+- `index.md`: content-oriented navigation.
+- `log.md`: append-only chronological activity log.
+
+Agents may read all layers. Agents must not modify raw sources.
+""",
+    )
+
+
+def ensure_seed_file(path: Path, content: str) -> None:
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
 
 
 def normalize_problem_id(problem_id: str | int) -> str:
@@ -235,17 +271,17 @@ def ingest_github_problems(
 
         problem_id = normalize_problem_id(record["number"])
         existing = read_json(problem_path(root, problem_id)) if problem_path(root, problem_id).exists() else None
-        statement = ""
+        page_data: dict[str, Any] = {}
         if fetch_statements:
             try:
-                statement = fetch_problem_statement(int(record["number"]))
+                page_data = fetch_problem_page_data(int(record["number"]))
             except Exception as exc:
                 errors.append({"problem_id": problem_id, "error": str(exc)})
 
         payload = github_record_to_problem(
             record,
             existing=existing,
-            statement=statement,
+            page_data=page_data,
             overwrite=overwrite,
             source_url=source_url,
         )
@@ -338,6 +374,7 @@ def github_record_to_problem(
     *,
     existing: dict[str, Any] | None = None,
     statement: str = "",
+    page_data: dict[str, Any] | None = None,
     overwrite: bool = False,
     source_url: str = PROBLEMS_YAML_URL,
 ) -> dict[str, Any]:
@@ -346,9 +383,16 @@ def github_record_to_problem(
     status = nested_state(record, "status", default="unknown")
     formalized = nested_state(record, "formalized", default="unknown")
     existing = existing or {}
+    page_data = page_data or {}
+    statement = str(page_data.get("statement") or statement)
     existing_statement = existing.get("statement_raw", "")
     statement_raw = statement.strip() if statement.strip() and (overwrite or not existing_statement) else existing_statement
     statement_source = "site_latex" if statement.strip() and (overwrite or not existing_statement) else existing.get("statement_source", "not_fetched")
+    remarks = str(page_data.get("remarks") or "")
+    existing_remarks = existing.get("remarks_raw", "")
+    remarks_raw = remarks.strip() if remarks.strip() and (overwrite or not existing_remarks) else existing_remarks
+    references = page_data.get("references") or []
+    known_references = references if references and (overwrite or not existing.get("known_references")) else existing.get("known_references", [])
     prize = normalize_prize(record.get("prize"))
 
     return {
@@ -365,7 +409,8 @@ def github_record_to_problem(
         "statement_raw": statement_raw,
         "statement_latex": existing.get("statement_latex", ""),
         "statement_source": statement_source,
-        "known_references": existing.get("known_references", []),
+        "remarks_raw": remarks_raw,
+        "known_references": known_references,
         "comments_summary": existing.get("comments_summary", []),
         "literature_status": existing.get("literature_status", "not_started"),
         "statement_risk": existing.get("statement_risk", "unknown"),
@@ -407,17 +452,105 @@ def ensure_list(value: Any) -> list[Any]:
 
 
 def fetch_problem_statement(number: int) -> str:
-    html_text = fetch_text(f"{ERDOS_PROBLEMS_BASE_URL}/latex/{number}")
-    statement = extract_problem_statement_from_html(html_text)
+    statement = fetch_problem_page_data(number)["statement"]
     if not statement:
         raise ValueError(f"Could not extract statement for problem {number}")
     return statement
 
 
+def fetch_problem_page_data(number: int) -> dict[str, Any]:
+    html_text = fetch_text(f"{ERDOS_PROBLEMS_BASE_URL}/latex/{number}")
+    content = extract_problem_content_from_html(html_text)
+    if not content["statement"]:
+        raise ValueError(f"Could not extract statement for problem {number}")
+    return content
+
+
 def extract_problem_statement_from_html(html_text: str) -> str:
-    parser = FirstClassDivTextParser("problem-text")
-    parser.feed(html_text)
-    return clean_html_text(parser.text)
+    return extract_problem_content_from_html(html_text)["statement"]
+
+
+def extract_problem_content_from_html(html_text: str) -> dict[str, Any]:
+    statement_parser = FirstClassDivTextParser("problem-text")
+    statement_parser.feed(html_text)
+
+    additional_parser = ClassDivTextCollector("problem-additional-text")
+    additional_parser.feed(html_text)
+    additional_sections = [clean_html_text(text) for text in additional_parser.texts]
+    additional_sections = [text for text in additional_sections if text]
+
+    references_section = ""
+    remarks_sections: list[str] = []
+    for section in additional_sections:
+        lowered = section.lower()
+        if lowered.startswith("references"):
+            references_section = section
+        elif "back to the problem" not in lowered:
+            remarks_sections.append(section)
+
+    remarks = "\n\n".join(remarks_sections).strip()
+    return {
+        "statement": clean_html_text(statement_parser.text),
+        "remarks": remarks,
+        "references": parse_reference_entries(references_section),
+    }
+
+
+def parse_reference_entries(text: str) -> list[str]:
+    references: list[str] = []
+    current = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.lower() == "references":
+            continue
+        if re.match(r"^\[[^\]]+\]", stripped):
+            if current:
+                references.append(current.strip())
+            current = stripped
+        elif current:
+            current = f"{current} {stripped}"
+    if current:
+        references.append(current.strip())
+    return references
+
+
+class ClassDivTextCollector(HTMLParser):
+    def __init__(self, class_name: str) -> None:
+        super().__init__()
+        self.class_name = class_name
+        self.depth = 0
+        self.capturing = False
+        self.current_parts: list[str] = []
+        self.texts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self.capturing:
+            if tag == "br":
+                self.current_parts.append("\n")
+                return
+            self.depth += 1
+            return
+        if tag != "div":
+            return
+        attrs_dict = {key: value or "" for key, value in attrs}
+        classes = attrs_dict.get("class", "").split()
+        if self.class_name in classes:
+            self.capturing = True
+            self.depth = 1
+            self.current_parts = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if not self.capturing:
+            return
+        self.depth -= 1
+        if self.depth <= 0:
+            self.capturing = False
+            self.texts.append("".join(self.current_parts))
+            self.current_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self.capturing:
+            self.current_parts.append(data)
 
 
 class FirstClassDivTextParser(HTMLParser):
@@ -715,6 +848,372 @@ def triage_all(
     }
     write_json(root / "reports" / "triage" / "index.json", index)
     return index
+
+
+def find_similar_problems(
+    root: Path,
+    seed_problem_id: str | int,
+    *,
+    status_filter: set[str] | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    seed = load_problem(root, seed_problem_id)
+    seed_id = seed.get("problem_id") or normalize_problem_id(seed["number"])
+    items: list[dict[str, Any]] = []
+    problem_paths = list_problem_paths(root)
+    common_refs = common_reference_keys(problem_paths)
+
+    for path in problem_paths:
+        candidate = read_json(path)
+        candidate_id = candidate.get("problem_id") or normalize_problem_id(candidate["number"])
+        if candidate_id == seed_id:
+            continue
+        status = str(candidate.get("status_site", "unknown")).lower()
+        if status_filter and status not in status_filter:
+            continue
+        score, rationale = similarity_score(seed, candidate, ignored_reference_keys=common_refs)
+        if score <= 0:
+            continue
+        items.append(
+            {
+                "problem_id": candidate_id,
+                "number": int(candidate["number"]),
+                "status_site": candidate.get("status_site", "unknown"),
+                "url": candidate.get("url", ""),
+                "tags": candidate.get("tags", []),
+                "statement_present": bool(candidate.get("statement_raw") or candidate.get("statement_latex")),
+                "similarity_score": score,
+                "rationale": rationale,
+                "recommended_next_action": score_problem(candidate)["recommended_next_action"],
+            }
+        )
+
+    items.sort(key=lambda item: (-item["similarity_score"], item["number"]))
+    items = items[:limit]
+    result = {
+        "generated_at": date.today().isoformat(),
+        "seed_problem_id": seed_id,
+        "seed_status": seed.get("status_site", "unknown"),
+        "seed_url": seed.get("url", ""),
+        "status_filter": sorted(status_filter) if status_filter else [],
+        "ignored_reference_keys": sorted(common_refs),
+        "returned": len(items),
+        "items": items,
+    }
+    write_json(root / "reports" / "analogies" / f"{seed_id}.json", result)
+    return result
+
+
+def record_literature_finding(
+    root: Path,
+    *,
+    problem_id: str | int,
+    paper_key: str,
+    title: str,
+    url: str = "",
+    summary: str = "",
+    method_tags: list[str] | None = None,
+    examples: list[str] | None = None,
+    relevance: int = 3,
+) -> dict[str, Any]:
+    normalized_problem_id = normalize_problem_id(problem_id)
+    finding_id = slugify(f"{normalized_problem_id}-{paper_key}")[:80]
+    payload = {
+        "finding_id": finding_id,
+        "problem_id": normalized_problem_id,
+        "paper_key": paper_key,
+        "title": title,
+        "url": url,
+        "summary": summary,
+        "method_tags": method_tags or [],
+        "examples": examples or [],
+        "relevance": relevance,
+        "status": "unreviewed",
+        "created_at": date.today().isoformat(),
+    }
+    write_json(root / "reports" / "literature" / "findings" / f"{finding_id}.json", payload)
+    append_log(root, f"literature_finding | {finding_id} | {title}")
+    write_finding_wiki_page(root, payload)
+    return payload
+
+
+def write_finding_wiki_page(root: Path, finding: dict[str, Any]) -> None:
+    examples_text = "\n".join(f"- {example}" for example in finding.get("examples", [])) or "- TODO"
+    tags_text = ", ".join(finding.get("method_tags", [])) or "none"
+    content = f"""# {finding['paper_key']}: {finding['title']}
+
+Problem: [[{finding['problem_id']}]]
+
+URL: {finding.get('url') or 'TODO'}
+
+Method tags: {tags_text}
+
+## Summary
+
+{finding.get('summary') or 'TODO'}
+
+## Examples
+
+{examples_text}
+
+## Pivot Notes
+
+TODO: identify which open problems may admit the same method, construction, obstruction, or computation.
+"""
+    write_text(root / "kb" / "wiki" / "papers" / f"{finding['finding_id']}.md", content)
+    update_kb_index(root, f"papers/{finding['finding_id']}.md", finding["title"])
+
+
+def pivot_from_literature_finding(
+    root: Path,
+    finding_id: str,
+    *,
+    status_filter: set[str] | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    finding_path = root / "reports" / "literature" / "findings" / f"{finding_id}.json"
+    if not finding_path.exists():
+        raise FileNotFoundError(f"No literature finding found at {finding_path}")
+    finding = read_json(finding_path)
+    source_problem_id = finding.get("problem_id")
+    items: list[dict[str, Any]] = []
+    query_tokens = math_tokens(" ".join([
+        finding.get("title", ""),
+        finding.get("summary", ""),
+        " ".join(finding.get("method_tags", [])),
+        " ".join(finding.get("examples", [])),
+    ]))
+    method_tags = {str(tag).lower() for tag in finding.get("method_tags", [])}
+
+    for path in list_problem_paths(root):
+        problem = read_json(path)
+        problem_id = problem.get("problem_id") or normalize_problem_id(problem["number"])
+        if problem_id == source_problem_id:
+            continue
+        status = str(problem.get("status_site", "unknown")).lower()
+        if status_filter and status not in status_filter:
+            continue
+
+        problem_tokens = math_tokens(problem_search_text(problem))
+        shared_tokens = sorted(query_tokens & problem_tokens)
+        problem_tags = {str(tag).lower() for tag in problem.get("tags", [])}
+        shared_tags = sorted(method_tags & problem_tags)
+        score = min(24, 2 * len(shared_tokens)) + 5 * len(shared_tags)
+        if score <= 0:
+            continue
+        rationale = []
+        if shared_tags:
+            rationale.append(f"method tags match problem tags: {', '.join(shared_tags)}")
+        if shared_tokens:
+            rationale.append(f"finding/problem shared terms: {', '.join(shared_tokens[:12])}")
+        items.append(
+            {
+                "problem_id": problem_id,
+                "number": int(problem["number"]),
+                "status_site": problem.get("status_site", "unknown"),
+                "url": problem.get("url", ""),
+                "tags": problem.get("tags", []),
+                "pivot_score": score,
+                "recommended_next_action": score_problem(problem)["recommended_next_action"],
+                "rationale": rationale,
+            }
+        )
+
+    items.sort(key=lambda item: (-item["pivot_score"], item["number"]))
+    items = items[:limit]
+    result = {
+        "generated_at": date.today().isoformat(),
+        "finding_id": finding_id,
+        "source_problem_id": source_problem_id,
+        "paper_key": finding.get("paper_key", ""),
+        "title": finding.get("title", ""),
+        "status_filter": sorted(status_filter) if status_filter else [],
+        "returned": len(items),
+        "items": items,
+    }
+    write_json(root / "reports" / "pivots" / f"{finding_id}.json", result)
+    append_log(root, f"pivot_from_finding | {finding_id} | returned={len(items)}")
+    return result
+
+
+def record_math_example(
+    root: Path,
+    *,
+    example_id: str,
+    statement: str,
+    source: str = "",
+    problem_id: str | int | None = None,
+    tags: list[str] | None = None,
+    role: str = "example",
+) -> dict[str, Any]:
+    normalized_id = slugify(example_id)
+    payload = {
+        "example_id": normalized_id,
+        "problem_id": normalize_problem_id(problem_id) if problem_id is not None else None,
+        "source": source,
+        "role": role,
+        "tags": tags or [],
+        "statement": statement,
+        "created_at": date.today().isoformat(),
+    }
+    write_json(root / "kb" / "examples" / f"{normalized_id}.json", payload)
+    content = f"""# Example: {normalized_id}
+
+Role: {role}
+
+Problem: {payload['problem_id'] or 'none'}
+
+Source: {source or 'TODO'}
+
+Tags: {', '.join(tags or []) or 'none'}
+
+## Statement
+
+{statement}
+
+## Reuse Notes
+
+TODO: explain which methods, conjectures, or counterexample searches this example should inform.
+"""
+    write_text(root / "kb" / "examples" / f"{normalized_id}.md", content)
+    update_kb_index(root, f"examples/{normalized_id}.md", f"Example: {normalized_id}")
+    append_log(root, f"example | {normalized_id} | {role}")
+    return payload
+
+
+def append_log(root: Path, entry: str) -> None:
+    log_path = root / "kb" / "log.md"
+    ensure_seed_file(log_path, "# Knowledge Base Log\n\n")
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(f"## [{date.today().isoformat()}] {entry}\n\n")
+
+
+def update_kb_index(root: Path, relative_path: str, summary: str) -> None:
+    index_path = root / "kb" / "index.md"
+    ensure_seed_file(index_path, "# Knowledge Base Index\n\n")
+    existing = index_path.read_text(encoding="utf-8")
+    line = f"- [[{relative_path}]] - {summary}\n"
+    if line not in existing:
+        with index_path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
+
+
+def slugify(text: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", text.strip().lower()).strip("-")
+    return slug or "item"
+
+
+def common_reference_keys(problem_paths: list[Path]) -> set[str]:
+    frequencies: dict[str, int] = {}
+    for path in problem_paths:
+        problem = read_json(path)
+        for key in reference_keys(problem.get("known_references", [])):
+            frequencies[key] = frequencies.get(key, 0) + 1
+    if not problem_paths:
+        return set()
+    threshold = max(3, len(problem_paths) // 10)
+    return {key for key, count in frequencies.items() if count > threshold}
+
+
+def similarity_score(
+    seed: dict[str, Any],
+    candidate: dict[str, Any],
+    *,
+    ignored_reference_keys: set[str] | None = None,
+) -> tuple[int, list[str]]:
+    rationale: list[str] = []
+    score = 0
+    ignored_reference_keys = ignored_reference_keys or set()
+
+    seed_tags = {str(tag).lower() for tag in seed.get("tags", [])}
+    candidate_tags = {str(tag).lower() for tag in candidate.get("tags", [])}
+    shared_tags = sorted(seed_tags & candidate_tags)
+    if shared_tags:
+        tag_score = 5 * len(shared_tags)
+        score += tag_score
+        rationale.append(f"shared tags: {', '.join(shared_tags)} (+{tag_score})")
+
+    seed_tokens = math_tokens(problem_search_text(seed))
+    candidate_tokens = math_tokens(problem_search_text(candidate))
+    shared_tokens = sorted(seed_tokens & candidate_tokens)
+    if shared_tokens:
+        token_score = min(20, 2 * len(shared_tokens))
+        score += token_score
+        rationale.append(f"shared math terms: {', '.join(shared_tokens[:12])} (+{token_score})")
+
+    seed_refs = reference_keys(seed.get("known_references", []))
+    candidate_refs = reference_keys(candidate.get("known_references", []))
+    shared_refs = sorted((seed_refs & candidate_refs) - ignored_reference_keys)
+    if shared_refs:
+        ref_score = 4 * len(shared_refs)
+        score += ref_score
+        rationale.append(f"shared references: {', '.join(shared_refs)} (+{ref_score})")
+
+    seed_oeis = {str(item).lower() for item in seed.get("oeis", []) if str(item).lower() not in {"n/a", "possible"}}
+    candidate_oeis = {str(item).lower() for item in candidate.get("oeis", []) if str(item).lower() not in {"n/a", "possible"}}
+    shared_oeis = sorted(seed_oeis & candidate_oeis)
+    if shared_oeis:
+        oeis_score = 3 * len(shared_oeis)
+        score += oeis_score
+        rationale.append(f"shared OEIS entries: {', '.join(shared_oeis)} (+{oeis_score})")
+
+    if seed.get("formalization_status") == "yes" and candidate.get("formalization_status") == "yes":
+        score += 1
+        rationale.append("both have formalization metadata (+1)")
+
+    return score, rationale
+
+
+def problem_search_text(problem: dict[str, Any]) -> str:
+    return " ".join(
+        str(problem.get(key, ""))
+        for key in ["statement_raw", "statement_latex"]
+    )
+
+
+def math_tokens(text: str) -> set[str]:
+    stop = {
+        "there",
+        "which",
+        "where",
+        "every",
+        "large",
+        "such",
+        "that",
+        "with",
+        "from",
+        "then",
+        "than",
+        "this",
+        "also",
+        "does",
+        "some",
+        "have",
+        "many",
+        "can",
+        "all",
+        "for",
+        "the",
+        "and",
+        "are",
+        "is",
+        "ldots",
+    }
+    tokens = {
+        token.lower()
+        for token in re.findall(r"[A-Za-z][A-Za-z0-9-]{3,}", text)
+        if token.lower() not in stop
+    }
+    return tokens
+
+
+def reference_keys(references: list[Any]) -> set[str]:
+    keys: set[str] = set()
+    for reference in references:
+        match = re.match(r"^\[([^\]]+)\]", str(reference).strip())
+        if match:
+            keys.add(match.group(1))
+    return keys
 
 
 def count_terms(text: str, terms: list[str]) -> int:

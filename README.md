@@ -86,6 +86,53 @@ reports/triage/epNNNN.json
 python3 -m erdos_agent triage-all --status all --limit 50
 ```
 
+## 解けた問題から横展開候補を探す
+
+seed問題に似たopen問題を探します。自分で解いた問題だけでなく、誰かが新しく解いた問題をseedにする運用も想定しています。
+
+```bash
+python3 -m erdos_agent transfer-search 728 --status open --limit 20
+```
+
+生成物:
+
+```text
+reports/analogies/ep0728.json
+```
+
+現時点のMVPでは、タグ、statement/remarks内の数学用語、共有参考文献、OEIS、formalization metadataを使って近さを計算します。将来的には、解法の核を匿名化した `Method Card` にして、似たopen問題へBlind Solverとして再投入する設計にします。
+
+## Literature findingからピボットする
+
+検索エージェントが有望な論文・手法・構成を見つけたら、findingとして保存します。
+
+```bash
+python3 -m erdos_agent add-finding 9 \
+  --paper-key "Cr71" \
+  --title "On the sum of a prime and of two powers of two" \
+  --summary "Uses a construction related to primes plus powers of two." \
+  --method-tag "additive basis" \
+  --method-tag "primes" \
+  --example "Odd integers not represented as p + 2^k + 2^l"
+```
+
+そのfindingから、似たopen問題へのピボット候補を出します。
+
+```bash
+python3 -m erdos_agent pivot-from-finding ep0009-cr71 --status open --limit 20
+```
+
+## 数学exampleを保存する
+
+```bash
+python3 -m erdos_agent add-example distinct-subset-sums-powers-of-two \
+  --statement "The powers of two have distinct subset sums." \
+  --tag "subset sums" \
+  --role "model construction"
+```
+
+知識ベースは `kb/` 以下に作られます。設計メモは [docs/knowledge_base.md](docs/knowledge_base.md) と [docs/agent_protocol.md](docs/agent_protocol.md) を見てください。
+
 ## 推奨運用
 
 1. `pipeline` で匿名化パケットとtriageを作る
