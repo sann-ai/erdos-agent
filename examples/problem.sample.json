@@ -1,0 +1,23 @@
+{
+  "attempts": [],
+  "comments_summary": [],
+  "formalization_status": "none",
+  "known_references": [],
+  "last_checked": "2026-05-02",
+  "literature_status": "not_started",
+  "number": 0,
+  "prize": null,
+  "problem_id": "ep0000",
+  "review_labels": [],
+  "statement_latex": "",
+  "statement_raw": "For every integer n >= 2, prove that n^2 >= 2n.",
+  "statement_risk": "unknown",
+  "status_local": "not_started",
+  "status_site": "unknown",
+  "tags": [
+    "sample"
+  ],
+  "title": "Sample toy task",
+  "url": ""
+}
+

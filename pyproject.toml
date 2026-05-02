@@ -1,0 +1,10 @@
+[project]
+name = "erdos-agent"
+version = "0.1.0"
+description = "MVP tooling for redacted Erdős problem triage and Codex solver packets."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+erdos-agent = "erdos_agent.cli:main"
+
