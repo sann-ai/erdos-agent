@@ -142,6 +142,7 @@ python3 -m erdos_agent create-run --problem 25 --agent literature
 python3 -m erdos_agent create-run --from-triage --agent literature --action literature_review --limit 5
 python3 -m erdos_agent list-runs --status queued
 python3 -m erdos_agent supervisor-step --limit 5
+python3 -m erdos_agent run-agent RUN_ID
 python3 -m erdos_agent complete-run RUN_ID --status done --summary "Created literature report" --artifact reports/literature/ep0025.md
 ```
 

@@ -40,8 +40,11 @@ Inspect and complete jobs with:
 ```bash
 python3 -m erdos_agent list-runs --status queued
 python3 -m erdos_agent supervisor-step --limit 5
+python3 -m erdos_agent run-agent RUN_ID
 python3 -m erdos_agent complete-run RUN_ID --status done --summary "short result" --artifact reports/literature/findings/foo.json
 ```
+
+`run-agent` currently uses deterministic MVP workers. It creates structured artifacts for literature, computation, statement audit, formalization, critic, or blind packet handoff; later Codex automations can replace these workers with live model-driven agents while preserving the same inbox/outbox contract.
 
 Each output should include:
 

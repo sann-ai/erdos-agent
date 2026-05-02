@@ -11,6 +11,7 @@ from .core import (
     create_agent_run,
     create_runs_from_triage,
     ensure_workspace,
+    execute_agent_run,
     find_similar_problems,
     ingest_github_problems,
     list_agent_runs,
@@ -121,6 +122,9 @@ def build_parser() -> argparse.ArgumentParser:
     supervisor_parser = subparsers.add_parser("supervisor-step", help="Summarize queued and completed agent runs.")
     supervisor_parser.add_argument("--limit", type=int, default=5)
 
+    run_agent_parser = subparsers.add_parser("run-agent", help="Execute one queued agent run with the built-in MVP worker.")
+    run_agent_parser.add_argument("run_id")
+
     redact_parser = subparsers.add_parser("redact", help="Generate a blind solver packet.")
     redact_parser.add_argument("problem_id")
 
@@ -208,6 +212,10 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "supervisor-step":
             run_supervisor_step(root, args)
+            return 0
+
+        if args.command == "run-agent":
+            run_execute_agent_run(root, args)
             return 0
 
         if args.command == "redact":
@@ -413,6 +421,13 @@ def run_supervisor_step(root: Path, args: argparse.Namespace) -> None:
     print(f"Queued: {result['queued_count']} Completed: {result['completed_count']}")
     for run in result["next_runs"]:
         print(f"{run['run_id']} {run['agent']} {run.get('problem_id')}")
+
+
+def run_execute_agent_run(root: Path, args: argparse.Namespace) -> None:
+    run = execute_agent_run(root, args.run_id)
+    print(f"Completed {run['run_id']} status={run['status']}")
+    for artifact in run.get("result_artifacts", []):
+        print(f"artifact: {artifact}")
 
 
 def run_redact(root: Path, problem_id: str) -> str:

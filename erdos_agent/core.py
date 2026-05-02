@@ -5,7 +5,7 @@ import html
 import json
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -725,6 +725,18 @@ def extract_keywords(statement: str, limit: int = 12) -> list[str]:
         "integers",
         "number",
         "numbers",
+        "lvert",
+        "rvert",
+        "ldots",
+        "subseteq",
+        "mathbb",
+        "geq",
+        "leq",
+        "epsilon",
+        "frac",
+        "left",
+        "right",
+        "backslash",
     }
     counts: dict[str, int] = {}
     for word in words:
@@ -1224,6 +1236,307 @@ def complete_agent_run(
     return payload
 
 
+def execute_agent_run(root: Path, run_id: str) -> dict[str, Any]:
+    inbox_path = agent_run_inbox_path(root, run_id)
+    if not inbox_path.exists():
+        raise FileNotFoundError(f"No queued run found at {inbox_path}")
+    run = read_json(inbox_path)
+    agent = run.get("agent")
+    problem_id = run.get("problem_id")
+    if not problem_id:
+        return complete_agent_run(
+            root,
+            run_id,
+            status="blocked",
+            summary="Run has no problem_id.",
+            artifacts=[],
+        )
+
+    if agent == "literature":
+        result = run_literature_worker(root, problem_id)
+    elif agent == "computation":
+        result = run_computation_worker(root, problem_id)
+    elif agent == "statement_auditor":
+        result = run_statement_auditor_worker(root, problem_id)
+    elif agent == "formalization":
+        result = run_formalization_worker(root, problem_id)
+    elif agent == "critic":
+        result = run_critic_worker(root, problem_id)
+    elif agent == "blind_solver":
+        result = run_blind_solver_packet_worker(root, problem_id)
+    else:
+        result = {
+            "status": "blocked",
+            "summary": f"Unsupported agent: {agent}",
+            "artifacts": [],
+        }
+
+    return complete_agent_run(
+        root,
+        run_id,
+        status=result["status"],
+        summary=result["summary"],
+        artifacts=result["artifacts"],
+    )
+
+
+def run_literature_worker(root: Path, problem_id: str | int) -> dict[str, Any]:
+    problem = load_problem(root, problem_id)
+    normalized = problem.get("problem_id") or normalize_problem_id(problem["number"])
+    content = make_literature_report(problem)
+    path = root / "reports" / "literature" / f"{normalized}.md"
+    write_text(path, content)
+    update_kb_index(root, f"wiki/problems/{normalized}.md", f"Problem {normalized} literature status")
+    write_problem_wiki_stub(root, problem)
+    return {
+        "status": "done",
+        "summary": f"Created literature report for {normalized}.",
+        "artifacts": [str(path.relative_to(root))],
+    }
+
+
+def make_literature_report(problem: dict[str, Any]) -> str:
+    problem_id = problem.get("problem_id") or normalize_problem_id(problem["number"])
+    statement = problem.get("statement_raw") or problem.get("statement_latex") or ""
+    references = problem.get("known_references", [])
+    remarks = problem.get("remarks_raw", "")
+    keywords = extract_keywords(" ".join([statement, remarks]), limit=16)
+    reference_text = "\n".join(f"- {reference}" for reference in references) or "- No references captured locally."
+    query_text = "\n".join(f"- {query}" for query in make_search_queries(problem, keywords))
+    return f"""# Literature Report for {problem_id}
+
+## Status
+
+- site status: {problem.get('status_site', 'unknown')}
+- tags: {', '.join(problem.get('tags', [])) or 'none'}
+- references captured: {len(references)}
+- statement source: {problem.get('statement_source', 'unknown')}
+
+## Statement
+
+{statement or 'TODO: fetch or add statement.'}
+
+## Remarks Snapshot
+
+{remarks or 'No remarks captured locally.'}
+
+## Captured References
+
+{reference_text}
+
+## Search Queries
+
+{query_text}
+
+## Result Card Targets
+
+- Known theorem that directly implies the statement.
+- Special case or obstruction.
+- Construction, counterexample, or extremal example.
+- Computation-ready sequence or finite search formulation.
+- Related solved problem whose method may transfer.
+
+## Pivot Instructions
+
+If a paper or method appears more useful for another open problem, record it with `add-finding`, then run `pivot-from-finding`.
+
+## Novelty Risk
+
+TODO: low / medium / high
+
+## What Remains Open
+
+TODO
+"""
+
+
+def make_search_queries(problem: dict[str, Any], keywords: list[str]) -> list[str]:
+    tags = [str(tag) for tag in problem.get("tags", [])]
+    base_terms = " ".join(keywords[:6])
+    queries = []
+    if base_terms:
+        queries.append(base_terms)
+    if tags and base_terms:
+        queries.append(f"{base_terms} {' '.join(tags[:2])}")
+    for reference in problem.get("known_references", [])[:3]:
+        key_match = re.match(r"^\[([^\]]+)\]\s*(.*)", str(reference))
+        if key_match:
+            queries.append(key_match.group(2)[:160])
+    return [query for query in queries if query.strip()]
+
+
+def write_problem_wiki_stub(root: Path, problem: dict[str, Any]) -> None:
+    problem_id = problem.get("problem_id") or normalize_problem_id(problem["number"])
+    content = f"""# {problem_id}
+
+Status: {problem.get('status_site', 'unknown')}
+
+Tags: {', '.join(problem.get('tags', [])) or 'none'}
+
+Official URL: {problem.get('url', '')}
+
+## Statement
+
+{problem.get('statement_raw') or problem.get('statement_latex') or 'TODO'}
+
+## Local Artifacts
+
+- [[../../reports/literature/{problem_id}.md]]
+- [[../../reports/triage/{problem_id}.json]]
+
+## Notes
+
+TODO
+"""
+    write_text(root / "kb" / "wiki" / "problems" / f"{problem_id}.md", content)
+
+
+def run_computation_worker(root: Path, problem_id: str | int) -> dict[str, Any]:
+    problem = load_problem(root, problem_id)
+    normalized = problem.get("problem_id") or normalize_problem_id(problem["number"])
+    path = root / "computations" / normalized / "README.md"
+    write_text(path, make_computation_plan(problem))
+    return {
+        "status": "done",
+        "summary": f"Created computation plan for {normalized}.",
+        "artifacts": [str(path.relative_to(root))],
+    }
+
+
+def make_computation_plan(problem: dict[str, Any]) -> str:
+    problem_id = problem.get("problem_id") or normalize_problem_id(problem["number"])
+    statement = problem.get("statement_raw") or problem.get("statement_latex") or ""
+    keywords = extract_keywords(statement, limit=12)
+    return f"""# Computation Plan for {problem_id}
+
+## Statement
+
+{statement or 'TODO'}
+
+## Signals
+
+- tags: {', '.join(problem.get('tags', [])) or 'none'}
+- OEIS: {', '.join(str(item) for item in problem.get('oeis', [])) or 'none'}
+- keywords: {', '.join(keywords)}
+
+## Candidate Experiments
+
+- Identify finite parameters and smallest nontrivial cases.
+- Search for counterexamples before trying to support the conjecture.
+- Reproduce any known small values from OEIS or remarks.
+- Log seeds, bounds, and exact commands for every run.
+
+## Files
+
+- `search.py`: TODO
+- `results.md`: TODO
+
+## Completion Criteria
+
+- Exact input domain is stated.
+- Small cases are reproducible.
+- Any counterexample candidate is independently checked.
+"""
+
+
+def run_statement_auditor_worker(root: Path, problem_id: str | int) -> dict[str, Any]:
+    problem = load_problem(root, problem_id)
+    normalized = problem.get("problem_id") or normalize_problem_id(problem["number"])
+    path = root / "reports" / "statement_audits" / f"{normalized}.md"
+    write_text(path, make_statement_audit(problem))
+    return {
+        "status": "done",
+        "summary": f"Created statement audit template for {normalized}.",
+        "artifacts": [str(path.relative_to(root))],
+    }
+
+
+def run_formalization_worker(root: Path, problem_id: str | int) -> dict[str, Any]:
+    problem = load_problem(root, problem_id)
+    normalized = problem.get("problem_id") or normalize_problem_id(problem["number"])
+    path = root / "lean" / normalized / "README.md"
+    write_text(path, make_formalization_plan(problem))
+    return {
+        "status": "done",
+        "summary": f"Created formalization plan for {normalized}.",
+        "artifacts": [str(path.relative_to(root))],
+    }
+
+
+def make_formalization_plan(problem: dict[str, Any]) -> str:
+    problem_id = problem.get("problem_id") or normalize_problem_id(problem["number"])
+    statement = problem.get("statement_raw") or problem.get("statement_latex") or ""
+    return f"""# Formalization Plan for {problem_id}
+
+## Informal Statement
+
+{statement or 'TODO'}
+
+## Lean Target
+
+TODO: write the exact theorem statement before attempting a proof.
+
+## Statement Correspondence Checklist
+
+- Variables and domains match.
+- Quantifier order matches.
+- No stronger assumptions.
+- No weaker conclusion.
+- Edge cases documented.
+- No `sorry`, `admit`, new axioms, or unsafe escape hatches in final proof.
+"""
+
+
+def run_critic_worker(root: Path, problem_id: str | int) -> dict[str, Any]:
+    problem = load_problem(root, problem_id)
+    normalized = problem.get("problem_id") or normalize_problem_id(problem["number"])
+    path = root / "reports" / "referee" / f"{normalized}.md"
+    write_text(path, make_referee_report(problem))
+    return {
+        "status": "done",
+        "summary": f"Created referee checklist for {normalized}.",
+        "artifacts": [str(path.relative_to(root))],
+    }
+
+
+def make_referee_report(problem: dict[str, Any]) -> str:
+    problem_id = problem.get("problem_id") or normalize_problem_id(problem["number"])
+    return f"""# Referee Report for {problem_id}
+
+## Artifacts Reviewed
+
+- TODO
+
+## Rejection Checklist
+
+- Does the attempt prove the exact intended statement?
+- Are quantifiers correct?
+- Are small cases and degenerate cases handled?
+- Is any lemma false in small cases?
+- Does the argument rely on an unstated asymptotic or genericity assumption?
+- Is it already known from captured references or nearby literature?
+- Does any Lean statement weaken the original problem?
+
+## Verdict
+
+do_not_post / needs_human / ask_expert / continue
+"""
+
+
+def run_blind_solver_packet_worker(root: Path, problem_id: str | int) -> dict[str, Any]:
+    problem = load_problem(root, problem_id)
+    task_id, content, manifest = make_blind_packet(problem)
+    packet_path = root / "packets" / "blind" / f"{task_id}.md"
+    manifest_path = root / "data" / "manifests" / f"{task_id}.json"
+    write_text(packet_path, content)
+    write_json(manifest_path, manifest)
+    return {
+        "status": "needs_human",
+        "summary": "Blind solver packet is ready; hand it to a blind solver agent without metadata.",
+        "artifacts": [str(packet_path.relative_to(root)), str(manifest_path.relative_to(root))],
+    }
+
+
 def supervisor_step(root: Path, *, limit: int = 5) -> dict[str, Any]:
     queued = [run for run in list_agent_runs(root, status="queued")]
     completed = [run for run in list_agent_runs(root) if run.get("status") in {"done", "needs_human", "blocked"}]
@@ -1249,7 +1562,8 @@ def supervisor_step(root: Path, *, limit: int = 5) -> dict[str, Any]:
 
 
 def make_run_id(agent: str, problem_id: str | None) -> str:
-    seed = f"{agent}:{problem_id or 'none'}:{date.today().isoformat()}"
+    stamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    seed = f"{agent}:{problem_id or 'none'}:{stamp}"
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8]
     base = f"{date.today().isoformat()}-{agent}"
     if problem_id:

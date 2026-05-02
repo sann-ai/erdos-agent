@@ -7,6 +7,7 @@ from erdos_agent.core import (
     create_agent_run,
     create_runs_from_triage,
     ensure_workspace,
+    execute_agent_run,
     extract_problem_content_from_html,
     extract_problem_statement_from_html,
     github_record_to_problem,
@@ -267,6 +268,49 @@ class CoreTests(unittest.TestCase):
             )
             self.assertEqual(len(runs), 1)
             self.assertEqual(runs[0]["problem_id"], "ep0025")
+
+    def test_execute_literature_agent_run(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "data/problems/ep0009.json",
+                {
+                    "number": 9,
+                    "problem_id": "ep0009",
+                    "status_site": "open",
+                    "tags": ["number theory", "primes"],
+                    "url": "https://example.invalid/9",
+                    "statement_raw": "Is every large odd integer a prime plus two powers of two?",
+                    "statement_source": "test",
+                    "remarks_raw": "A useful reference exists.",
+                    "known_references": ["[Ab24] A. Author, A title."],
+                    "oeis": [],
+                    "formalization_status": "yes",
+                },
+            )
+            run = create_agent_run(root, agent="literature", problem_id=9)
+            completed = execute_agent_run(root, run["run_id"])
+            self.assertEqual(completed["status"], "done")
+            self.assertTrue((root / "reports/literature/ep0009.md").exists())
+            self.assertTrue((root / "agent_runs/outbox" / f"{run['run_id']}.json").exists())
+
+    def test_execute_blind_solver_packet_run_needs_human(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "data/problems/ep0001.json",
+                {
+                    "number": 1,
+                    "problem_id": "ep0001",
+                    "statement_raw": "For every integer n >= 2, prove that n^2 >= 2n.",
+                },
+            )
+            run = create_agent_run(root, agent="blind_solver", problem_id=1)
+            completed = execute_agent_run(root, run["run_id"])
+            self.assertEqual(completed["status"], "needs_human")
+            self.assertTrue(completed["result_artifacts"][0].startswith("packets/blind/"))
 
 
 if __name__ == "__main__":
