@@ -28,6 +28,21 @@ Codex automations should exchange files rather than hidden chat state:
 - Outputs: `agent_runs/outbox/*.json`
 - Durable artifacts: `data/`, `reports/`, `packets/`, `kb/`, `computations/`, `lean/`
 
+Create queued jobs with:
+
+```bash
+python3 -m erdos_agent create-run --problem 25 --agent literature
+python3 -m erdos_agent create-run --from-triage --agent literature --action literature_review --limit 5
+```
+
+Inspect and complete jobs with:
+
+```bash
+python3 -m erdos_agent list-runs --status queued
+python3 -m erdos_agent supervisor-step --limit 5
+python3 -m erdos_agent complete-run RUN_ID --status done --summary "short result" --artifact reports/literature/findings/foo.json
+```
+
 Each output should include:
 
 ```json
@@ -49,4 +64,3 @@ If a Literature Agent finds a paper, construction, example, or method that looks
 2. Run `pivot-from-finding`.
 3. Put the top pivot candidates in `agent_runs/outbox/`.
 4. Let Supervisor decide whether to switch focus.
-

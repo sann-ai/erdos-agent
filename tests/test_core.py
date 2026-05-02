@@ -3,6 +3,9 @@ from tempfile import TemporaryDirectory
 from pathlib import Path
 
 from erdos_agent.core import (
+    complete_agent_run,
+    create_agent_run,
+    create_runs_from_triage,
     ensure_workspace,
     extract_problem_content_from_html,
     extract_problem_statement_from_html,
@@ -15,6 +18,7 @@ from erdos_agent.core import (
     record_math_example,
     score_problem,
     similarity_score,
+    supervisor_step,
     write_json,
 )
 
@@ -200,6 +204,69 @@ class CoreTests(unittest.TestCase):
             )
             self.assertEqual(payload["example_id"], "toy-example")
             self.assertTrue((root / "kb/examples/toy-example.md").exists())
+
+    def test_agent_run_lifecycle(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            run = create_agent_run(
+                root,
+                agent="literature",
+                problem_id=9,
+                prompt="Find relevant papers.",
+                artifacts=["data/problems/ep0009.json"],
+            )
+            self.assertTrue((root / "agent_runs/inbox" / f"{run['run_id']}.json").exists())
+            step = supervisor_step(root)
+            self.assertEqual(step["queued_count"], 1)
+            completed = complete_agent_run(
+                root,
+                run["run_id"],
+                status="done",
+                summary="Found one paper.",
+                artifacts=["reports/literature/findings/example.json"],
+            )
+            self.assertEqual(completed["status"], "done")
+            self.assertFalse((root / "agent_runs/inbox" / f"{run['run_id']}.json").exists())
+            self.assertTrue((root / "agent_runs/outbox" / f"{run['run_id']}.json").exists())
+
+    def test_create_agent_run_reuses_existing_queued_run(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            first = create_agent_run(root, agent="literature", problem_id=9)
+            second = create_agent_run(root, agent="literature", problem_id="ep0009")
+            self.assertEqual(first["run_id"], second["run_id"])
+
+    def test_create_runs_from_triage(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "reports/triage/index.json",
+                {
+                    "items": [
+                        {
+                            "problem_id": "ep0009",
+                            "priority_score": 37,
+                            "recommended_next_action": "computation",
+                        },
+                        {
+                            "problem_id": "ep0025",
+                            "priority_score": 43,
+                            "recommended_next_action": "literature_review",
+                        },
+                    ]
+                },
+            )
+            runs = create_runs_from_triage(
+                root,
+                agent="literature",
+                limit=1,
+                action_filter={"literature_review"},
+            )
+            self.assertEqual(len(runs), 1)
+            self.assertEqual(runs[0]["problem_id"], "ep0025")
 
 
 if __name__ == "__main__":

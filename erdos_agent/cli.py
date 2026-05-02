@@ -6,10 +6,14 @@ from pathlib import Path
 
 from .core import (
     PROBLEMS_YAML_URL,
+    complete_agent_run,
     create_problem,
+    create_agent_run,
+    create_runs_from_triage,
     ensure_workspace,
     find_similar_problems,
     ingest_github_problems,
+    list_agent_runs,
     load_problem,
     make_blind_packet,
     make_claim_card,
@@ -20,6 +24,7 @@ from .core import (
     record_literature_finding,
     record_math_example,
     score_problem,
+    supervisor_step,
     triage_all,
     write_json,
     write_text,
@@ -93,6 +98,29 @@ def build_parser() -> argparse.ArgumentParser:
     example_parser.add_argument("--tag", action="append", default=[])
     example_parser.add_argument("--role", default="example")
 
+    run_parser = subparsers.add_parser("create-run", help="Create agent run job JSON in agent_runs/inbox.")
+    run_source = run_parser.add_mutually_exclusive_group(required=True)
+    run_source.add_argument("--problem")
+    run_source.add_argument("--from-triage", action="store_true")
+    run_parser.add_argument("--agent", required=True)
+    run_parser.add_argument("--limit", type=int, default=5, help="Used with --from-triage.")
+    run_parser.add_argument("--action", action="append", default=[], help="Filter triage recommended_next_action when using --from-triage.")
+    run_parser.add_argument("--prompt", default="")
+    run_parser.add_argument("--artifact", action="append", default=[])
+    run_parser.add_argument("--priority", type=int, default=3)
+
+    list_runs_parser = subparsers.add_parser("list-runs", help="List agent run jobs.")
+    list_runs_parser.add_argument("--status", choices=["queued", "done", "blocked", "needs_human", "cancelled"])
+
+    complete_parser = subparsers.add_parser("complete-run", help="Move a queued run from inbox to outbox.")
+    complete_parser.add_argument("run_id")
+    complete_parser.add_argument("--status", required=True, choices=["done", "blocked", "needs_human", "cancelled"])
+    complete_parser.add_argument("--summary", required=True)
+    complete_parser.add_argument("--artifact", action="append", default=[])
+
+    supervisor_parser = subparsers.add_parser("supervisor-step", help="Summarize queued and completed agent runs.")
+    supervisor_parser.add_argument("--limit", type=int, default=5)
+
     redact_parser = subparsers.add_parser("redact", help="Generate a blind solver packet.")
     redact_parser.add_argument("problem_id")
 
@@ -164,6 +192,22 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "add-example":
             run_add_example(root, args)
+            return 0
+
+        if args.command == "create-run":
+            run_create_agent_run(root, args)
+            return 0
+
+        if args.command == "list-runs":
+            run_list_agent_runs(root, args)
+            return 0
+
+        if args.command == "complete-run":
+            run_complete_agent_run(root, args)
+            return 0
+
+        if args.command == "supervisor-step":
+            run_supervisor_step(root, args)
             return 0
 
         if args.command == "redact":
@@ -313,6 +357,62 @@ def run_add_example(root: Path, args: argparse.Namespace) -> None:
     )
     path = root / "kb" / "examples" / f"{payload['example_id']}.json"
     print(f"Wrote {path}")
+
+
+def run_create_agent_run(root: Path, args: argparse.Namespace) -> None:
+    if args.from_triage:
+        runs = create_runs_from_triage(
+            root,
+            agent=args.agent,
+            limit=args.limit,
+            action_filter=set(args.action) if args.action else None,
+        )
+        print(f"Created {len(runs)} runs")
+        for run in runs:
+            print(f"{run['run_id']} {run['agent']} {run.get('problem_id')}")
+        return
+
+    run = create_agent_run(
+        root,
+        agent=args.agent,
+        problem_id=args.problem,
+        prompt=args.prompt,
+        artifacts=args.artifact,
+        priority=args.priority,
+        metadata={"source": "manual"},
+    )
+    path = root / "agent_runs" / "inbox" / f"{run['run_id']}.json"
+    print(f"Wrote {path}")
+
+
+def run_list_agent_runs(root: Path, args: argparse.Namespace) -> None:
+    runs = list_agent_runs(root, status=args.status)
+    for run in runs:
+        print(
+            f"{run['run_id']} status={run['status']} agent={run['agent']} "
+            f"problem={run.get('problem_id')} priority={run.get('priority')}"
+        )
+    print(f"Total: {len(runs)}")
+
+
+def run_complete_agent_run(root: Path, args: argparse.Namespace) -> None:
+    run = complete_agent_run(
+        root,
+        args.run_id,
+        status=args.status,
+        summary=args.summary,
+        artifacts=args.artifact,
+    )
+    path = root / "agent_runs" / "outbox" / f"{run['run_id']}.json"
+    print(f"Wrote {path}")
+
+
+def run_supervisor_step(root: Path, args: argparse.Namespace) -> None:
+    result = supervisor_step(root, limit=args.limit)
+    print(f"Wrote {root / 'agent_runs' / 'supervisor_step.json'}")
+    print(f"Queued: {result['queued_count']} Completed: {result['completed_count']}")
+    for run in result["next_runs"]:
+        print(f"{run['run_id']} {run['agent']} {run.get('problem_id')}")
 
 
 def run_redact(root: Path, problem_id: str) -> str:

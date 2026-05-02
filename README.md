@@ -133,6 +133,29 @@ python3 -m erdos_agent add-example distinct-subset-sums-powers-of-two \
 
 知識ベースは `kb/` 以下に作られます。設計メモは [docs/knowledge_base.md](docs/knowledge_base.md) と [docs/agent_protocol.md](docs/agent_protocol.md) を見てください。
 
+## Agent Run/job queue
+
+Codexオートメーションやマルチエージェント用に、JSON jobを `agent_runs/inbox/` に作れます。
+
+```bash
+python3 -m erdos_agent create-run --problem 25 --agent literature
+python3 -m erdos_agent create-run --from-triage --agent literature --action literature_review --limit 5
+python3 -m erdos_agent list-runs --status queued
+python3 -m erdos_agent supervisor-step --limit 5
+python3 -m erdos_agent complete-run RUN_ID --status done --summary "Created literature report" --artifact reports/literature/ep0025.md
+```
+
+agentは今のところ以下を想定しています。
+
+```text
+literature
+blind_solver
+computation
+formalization
+critic
+statement_auditor
+```
+
 ## 推奨運用
 
 1. `pipeline` で匿名化パケットとtriageを作る

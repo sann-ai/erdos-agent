@@ -1103,6 +1103,203 @@ def slugify(text: str) -> str:
     return slug or "item"
 
 
+RUN_STATUSES = {"queued", "done", "blocked", "needs_human", "cancelled"}
+AGENT_KINDS = {"literature", "blind_solver", "computation", "formalization", "critic", "statement_auditor"}
+
+
+def create_agent_run(
+    root: Path,
+    *,
+    agent: str,
+    problem_id: str | int | None = None,
+    prompt: str = "",
+    artifacts: list[str] | None = None,
+    priority: int = 3,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if agent not in AGENT_KINDS:
+        raise ValueError(f"Unknown agent {agent!r}. Expected one of: {', '.join(sorted(AGENT_KINDS))}")
+    normalized_problem_id = normalize_problem_id(problem_id) if problem_id is not None else None
+    existing = find_existing_queued_run(root, agent=agent, problem_id=normalized_problem_id)
+    if existing is not None:
+        return existing
+    run_id = make_run_id(agent, normalized_problem_id)
+    payload = {
+        "run_id": run_id,
+        "agent": agent,
+        "problem_id": normalized_problem_id,
+        "status": "queued",
+        "priority": priority,
+        "prompt": prompt,
+        "artifacts": artifacts or [],
+        "metadata": metadata or {},
+        "created_at": date.today().isoformat(),
+        "updated_at": date.today().isoformat(),
+    }
+    write_json(agent_run_inbox_path(root, run_id), payload)
+    append_log(root, f"agent_run_created | {run_id} | {agent} | {normalized_problem_id or 'none'}")
+    return payload
+
+
+def find_existing_queued_run(root: Path, *, agent: str, problem_id: str | None) -> dict[str, Any] | None:
+    for path in sorted((root / "agent_runs" / "inbox").glob("*.json")):
+        payload = read_json(path)
+        if payload.get("status") == "queued" and payload.get("agent") == agent and payload.get("problem_id") == problem_id:
+            return payload
+    return None
+
+
+def create_runs_from_triage(
+    root: Path,
+    *,
+    agent: str,
+    limit: int = 5,
+    action_filter: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    index_path = root / "reports" / "triage" / "index.json"
+    if not index_path.exists():
+        raise FileNotFoundError("reports/triage/index.json is missing; run triage-all first.")
+    index = read_json(index_path)
+    runs: list[dict[str, Any]] = []
+    for item in index.get("items", []):
+        if action_filter and item.get("recommended_next_action") not in action_filter:
+            continue
+        prompt = default_run_prompt(agent, item["problem_id"], item.get("recommended_next_action", ""))
+        artifacts = default_run_artifacts(root, agent, item["problem_id"])
+        runs.append(
+            create_agent_run(
+                root,
+                agent=agent,
+                problem_id=item["problem_id"],
+                prompt=prompt,
+                artifacts=artifacts,
+                priority=3,
+                metadata={
+                    "source": "triage",
+                    "priority_score": item.get("priority_score"),
+                    "recommended_next_action": item.get("recommended_next_action"),
+                },
+            )
+        )
+        if len(runs) >= limit:
+            break
+    return runs
+
+
+def list_agent_runs(root: Path, *, status: str | None = None) -> list[dict[str, Any]]:
+    runs: list[dict[str, Any]] = []
+    for directory in [root / "agent_runs" / "inbox", root / "agent_runs" / "outbox"]:
+        for path in sorted(directory.glob("*.json")):
+            payload = read_json(path)
+            if status and payload.get("status") != status:
+                continue
+            payload["_path"] = str(path)
+            runs.append(payload)
+    runs.sort(key=lambda run: (run.get("status") != "queued", run.get("priority", 999), run.get("created_at", ""), run.get("run_id", "")))
+    return runs
+
+
+def complete_agent_run(
+    root: Path,
+    run_id: str,
+    *,
+    status: str,
+    summary: str,
+    artifacts: list[str] | None = None,
+) -> dict[str, Any]:
+    if status not in RUN_STATUSES - {"queued"}:
+        raise ValueError(f"Completion status must be one of: {', '.join(sorted(RUN_STATUSES - {'queued'}))}")
+    inbox_path = agent_run_inbox_path(root, run_id)
+    if not inbox_path.exists():
+        raise FileNotFoundError(f"No queued run found at {inbox_path}")
+    payload = read_json(inbox_path)
+    payload["status"] = status
+    payload["summary"] = summary
+    payload["result_artifacts"] = artifacts or []
+    payload["updated_at"] = date.today().isoformat()
+    outbox_path = agent_run_outbox_path(root, run_id)
+    write_json(outbox_path, payload)
+    inbox_path.unlink()
+    append_log(root, f"agent_run_completed | {run_id} | {status}")
+    return payload
+
+
+def supervisor_step(root: Path, *, limit: int = 5) -> dict[str, Any]:
+    queued = [run for run in list_agent_runs(root, status="queued")]
+    completed = [run for run in list_agent_runs(root) if run.get("status") in {"done", "needs_human", "blocked"}]
+    next_runs = queued[:limit]
+    result = {
+        "generated_at": date.today().isoformat(),
+        "queued_count": len(queued),
+        "completed_count": len(completed),
+        "next_runs": [
+            {
+                "run_id": run["run_id"],
+                "agent": run["agent"],
+                "problem_id": run.get("problem_id"),
+                "priority": run.get("priority"),
+                "prompt": run.get("prompt", ""),
+                "artifacts": run.get("artifacts", []),
+            }
+            for run in next_runs
+        ],
+    }
+    write_json(root / "agent_runs" / "supervisor_step.json", result)
+    return result
+
+
+def make_run_id(agent: str, problem_id: str | None) -> str:
+    seed = f"{agent}:{problem_id or 'none'}:{date.today().isoformat()}"
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8]
+    base = f"{date.today().isoformat()}-{agent}"
+    if problem_id:
+        base = f"{base}-{problem_id}"
+    return f"{base}-{digest}"
+
+
+def agent_run_inbox_path(root: Path, run_id: str) -> Path:
+    return root / "agent_runs" / "inbox" / f"{run_id}.json"
+
+
+def agent_run_outbox_path(root: Path, run_id: str) -> Path:
+    return root / "agent_runs" / "outbox" / f"{run_id}.json"
+
+
+def default_run_prompt(agent: str, problem_id: str, recommended_next_action: str = "") -> str:
+    if agent == "literature":
+        return f"Prepare a literature report for {problem_id}. Record useful findings with add-finding and pivot if a better target appears."
+    if agent == "blind_solver":
+        return f"Use only the blind packet for {problem_id}. Produce a proof, disproof, or gap-labeled partial attempt."
+    if agent == "computation":
+        return f"Design and run a focused computation or counterexample search for {problem_id}."
+    if agent == "formalization":
+        return f"Create or inspect a Lean formalization target for {problem_id}."
+    if agent == "critic":
+        return f"Review the current attempt artifacts for {problem_id} and try to reject them."
+    if agent == "statement_auditor":
+        return f"Audit the exact statement, quantifiers, edge cases, and redaction risk for {problem_id}."
+    return f"Handle {recommended_next_action} for {problem_id}."
+
+
+def default_run_artifacts(root: Path, agent: str, problem_id: str) -> list[str]:
+    artifacts: list[str] = []
+    normalized = normalize_problem_id(problem_id)
+    problem_file = root / "data" / "problems" / f"{normalized}.json"
+    if problem_file.exists() and agent != "blind_solver":
+        artifacts.append(str(problem_file.relative_to(root)))
+    if agent == "blind_solver":
+        manifest_paths = sorted((root / "data" / "manifests").glob("math-task-*.json"))
+        for manifest_path in manifest_paths:
+            manifest = read_json(manifest_path)
+            if manifest.get("problem_id") == normalized:
+                artifacts.append(str((root / "packets" / "blind" / f"{manifest['task_id']}.md").relative_to(root)))
+                break
+    triage_file = root / "reports" / "triage" / f"{normalized}.json"
+    if triage_file.exists():
+        artifacts.append(str(triage_file.relative_to(root)))
+    return artifacts
+
+
 def common_reference_keys(problem_paths: list[Path]) -> set[str]:
     frequencies: dict[str, int] = {}
     for path in problem_paths:
