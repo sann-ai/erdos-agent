@@ -49,13 +49,20 @@ reports/literature/review/promotion_candidates.md
 Then approve a candidate only after review:
 
 ```bash
-python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --pivot-limit 20
+python3 -m erdos_agent review-promotion-candidate CANDIDATE_ID
+python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --reviewer YOUR_NAME --note "brief reason" --pivot-limit 20
+```
+
+Or mark it as reviewed but not approved:
+
+```bash
+python3 -m erdos_agent mark-promotion-candidate CANDIDATE_ID --decision rejected --reviewer YOUR_NAME --note "keyword match only"
 ```
 
 To approve and queue follow-up jobs in one step:
 
 ```bash
-python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --queue-pivots --queue-limit 3 --queue-min-score 10
+python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --reviewer YOUR_NAME --note "brief reason" --queue-pivots --queue-limit 3 --queue-min-score 10
 ```
 
 ## Next Good Step

@@ -7,6 +7,7 @@ from pathlib import Path
 from .core import (
     PROBLEMS_YAML_URL,
     approve_promotion_candidate,
+    build_promotion_candidate_packet,
     build_promotion_candidate_report,
     complete_agent_run,
     create_problem,
@@ -28,6 +29,7 @@ from .core import (
     pivot_from_literature_finding,
     promote_literature_search_result,
     quickstart_check,
+    record_promotion_candidate_decision,
     record_literature_finding,
     record_math_example,
     search_literature_for_problem,
@@ -165,6 +167,16 @@ def build_parser() -> argparse.ArgumentParser:
     review_search_parser.add_argument("--limit", type=int, default=20)
     review_search_parser.add_argument("--min-score", type=int, default=1)
     review_search_parser.add_argument("--include-promoted", action="store_true")
+    review_search_parser.add_argument("--include-decided", action="store_true")
+
+    review_candidate_parser = subparsers.add_parser("review-promotion-candidate", help="Build a source-aware human review packet for one promotion candidate.")
+    review_candidate_parser.add_argument("candidate_id")
+
+    mark_candidate_parser = subparsers.add_parser("mark-promotion-candidate", help="Record a human review decision without approving a promotion candidate.")
+    mark_candidate_parser.add_argument("candidate_id")
+    mark_candidate_parser.add_argument("--decision", required=True, choices=["rejected", "deferred", "needs_more_reading"])
+    mark_candidate_parser.add_argument("--reviewer", default="")
+    mark_candidate_parser.add_argument("--note", action="append", default=[], help="Repeatable human review note stored in the decision artifact.")
 
     approve_parser = subparsers.add_parser("approve-promotion-candidate", help="Approve a search result candidate, promote it, and optionally queue pivots.")
     approve_parser.add_argument("candidate_id")
@@ -174,6 +186,8 @@ def build_parser() -> argparse.ArgumentParser:
     approve_parser.add_argument("--queue-limit", type=int, default=3)
     approve_parser.add_argument("--queue-min-score", type=int, default=10)
     approve_parser.add_argument("--agent", default="auto", choices=["auto", "literature", "blind_solver", "computation", "formalization", "critic", "statement_auditor"])
+    approve_parser.add_argument("--reviewer", default="")
+    approve_parser.add_argument("--note", action="append", default=[], help="Repeatable human review note stored in the approval artifact.")
 
     promote_parser = subparsers.add_parser("promote-search-result", help="Turn a literature search result into an unreviewed finding and pivot candidates.")
     promote_parser.add_argument("problem_id")
@@ -294,6 +308,14 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "review-search-results":
             run_review_search_results(root, args)
+            return 0
+
+        if args.command == "review-promotion-candidate":
+            run_review_promotion_candidate(root, args)
+            return 0
+
+        if args.command == "mark-promotion-candidate":
+            run_mark_promotion_candidate(root, args)
             return 0
 
         if args.command == "approve-promotion-candidate":
@@ -600,6 +622,7 @@ def run_review_search_results(root: Path, args: argparse.Namespace) -> None:
         limit=args.limit,
         min_score=args.min_score,
         include_promoted=args.include_promoted,
+        include_decided=args.include_decided,
     )
     print("Wrote reports/literature/review/promotion_candidates.json")
     print("Wrote reports/literature/review/promotion_candidates.md")
@@ -609,6 +632,26 @@ def run_review_search_results(root: Path, args: argparse.Namespace) -> None:
             f"{item['candidate_id']} score={item['review_score']} "
             f"status={item['status']} source={item['source']} title={item['title'][:80]}"
         )
+
+
+def run_review_promotion_candidate(root: Path, args: argparse.Namespace) -> None:
+    result = build_promotion_candidate_packet(root, args.candidate_id)
+    print(f"Built review packet: {args.candidate_id}")
+    for artifact in result["artifacts"]:
+        print(f"artifact: {artifact}")
+
+
+def run_mark_promotion_candidate(root: Path, args: argparse.Namespace) -> None:
+    result = record_promotion_candidate_decision(
+        root,
+        args.candidate_id,
+        decision=args.decision,
+        reviewer=args.reviewer,
+        notes=args.note,
+    )
+    print(f"Recorded decision: {args.candidate_id} -> {args.decision}")
+    for artifact in result["artifacts"]:
+        print(f"artifact: {artifact}")
 
 
 def run_approve_promotion_candidate(root: Path, args: argparse.Namespace) -> None:
@@ -621,6 +664,8 @@ def run_approve_promotion_candidate(root: Path, args: argparse.Namespace) -> Non
         queue_limit=args.queue_limit,
         queue_min_score=args.queue_min_score,
         agent=args.agent,
+        reviewer=args.reviewer,
+        review_notes=args.note,
     )
     finding = result["promotion"]["finding"]
     print(f"Approved candidate: {args.candidate_id}")

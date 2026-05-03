@@ -118,6 +118,24 @@ reports/literature/review/promotion_candidates.md
 
 This is the human review gate. Do not approve a candidate just because it scored highly.
 
+For one candidate, generate a source-aware review packet:
+
+```bash
+python3 -m erdos_agent review-promotion-candidate CANDIDATE_ID
+```
+
+Inspect:
+
+```bash
+reports/literature/review/packets/CANDIDATE_ID.md
+```
+
+If a candidate is not useful, mark the decision so it does not keep resurfacing:
+
+```bash
+python3 -m erdos_agent mark-promotion-candidate CANDIDATE_ID --decision rejected --reviewer YOUR_NAME --note "keyword match only"
+```
+
 ## 6. Let Supervisor Summarize The State
 
 ```bash
@@ -137,7 +155,7 @@ If `queued_count` is `0` but `review_candidates.available` is `true`, the next a
 After a human checks a candidate in `promotion_candidates.md`, approve it:
 
 ```bash
-python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --pivot-limit 20
+python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --reviewer YOUR_NAME --note "brief reason" --pivot-limit 20
 ```
 
 This creates:
@@ -153,7 +171,7 @@ kb/wiki/papers/FINDING_ID.md
 To approve and queue follow-up jobs from the pivot candidates:
 
 ```bash
-python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --queue-pivots --queue-limit 3 --queue-min-score 10
+python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --reviewer YOUR_NAME --note "brief reason" --queue-pivots --queue-limit 3 --queue-min-score 10
 ```
 
 ## 8. Continue Or Stop

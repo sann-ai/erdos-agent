@@ -44,7 +44,14 @@ Promote a reviewed-enough search result into an unreviewed finding and pivot can
 
 ```bash
 python3 -m erdos_agent review-search-results --limit 20 --min-score 7
-python3 -m erdos_agent approve-promotion-candidate ep0009-r001 --pivot-limit 20
+python3 -m erdos_agent review-promotion-candidate ep0009-r001
+python3 -m erdos_agent approve-promotion-candidate ep0009-r001 --reviewer YOUR_NAME --note "brief reason" --pivot-limit 20
+```
+
+If a reviewed candidate is a false lead or should wait, record a decision instead of approving it:
+
+```bash
+python3 -m erdos_agent mark-promotion-candidate ep0009-r001 --decision rejected --reviewer YOUR_NAME --note "keyword match only"
 ```
 
 The review list deduplicates likely identical papers across arXiv/Crossref and across multiple seed problems. Folded matches remain visible as `related_candidates` and `related_problem_ids`, so a human can still see that one paper may matter for several problems without reviewing the same title repeatedly.
@@ -63,6 +70,8 @@ reports/pivots/FINDING_ID.json
 reports/literature/promotions/epNNNN-r001.json
 reports/literature/review/promotion_candidates.json
 reports/literature/review/promotion_candidates.md
+reports/literature/review/packets/epNNNN-r001.md
+reports/literature/review/decisions/epNNNN-r001.json
 reports/literature/review/approvals/epNNNN-r001.json
 ```
 
@@ -105,7 +114,8 @@ python3 -m erdos_agent review-search-results --limit 20 --min-score 7
 4. Approve a reviewed candidate:
 
 ```bash
-python3 -m erdos_agent approve-promotion-candidate ep0009-r001 --pivot-limit 20
+python3 -m erdos_agent review-promotion-candidate ep0009-r001
+python3 -m erdos_agent approve-promotion-candidate ep0009-r001 --reviewer YOUR_NAME --note "brief reason" --pivot-limit 20
 ```
 
 Or record a finding manually:

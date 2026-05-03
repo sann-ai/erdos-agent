@@ -199,6 +199,18 @@ Added:
 
 This keeps the Supervisor review page focused when the same paper appears from several searches, while preserving enough provenance for a human to decide which candidate to approve.
 
+### Candidate Review Packets
+
+Added:
+
+- `review-promotion-candidate CANDIDATE_ID`
+- `mark-promotion-candidate CANDIDATE_ID --decision rejected|deferred|needs_more_reading`
+- source-aware human review packets under `reports/literature/review/packets/`
+- human review decisions under `reports/literature/review/decisions/`
+- approval metadata fields for `reviewer`, `review_notes`, and a candidate snapshot
+
+This makes approval auditable for multi-person work without weakening the no-auto-posting/no-novelty-claim rule.
+
 Purpose:
 
 - Give new contributors a small local workflow from ingest through review-gated literature promotion.

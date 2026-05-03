@@ -187,4 +187,4 @@ The current `transfer-search` is simple. Later versions should cluster problems 
 
 ## Recommended Immediate Next Step
 
-Use the deduplicated review candidate report to approve one high-confidence literature finding, then verify the full loop from approval to `pivot-from-finding` to queued follow-up runs.
+Use `review-promotion-candidate` on one high-confidence literature candidate, then either mark it rejected/deferred or approve it with reviewer notes and verify the full loop from approval to `pivot-from-finding` to queued follow-up runs.

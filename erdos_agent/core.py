@@ -34,6 +34,8 @@ DEFAULT_DIRS = [
     "reports/literature/promotions",
     "reports/literature/review",
     "reports/literature/review/approvals",
+    "reports/literature/review/decisions",
+    "reports/literature/review/packets",
     "reports/literature/search",
     "reports/literature/result_cards",
     "reports/pivots",
@@ -1179,6 +1181,7 @@ def build_promotion_candidate_report(
     limit: int = 20,
     min_score: int = 1,
     include_promoted: bool = False,
+    include_decided: bool = False,
 ) -> dict[str, Any]:
     raw_candidates: list[dict[str, Any]] = []
     for search_path in sorted((root / "reports" / "literature" / "search").glob("ep*.json")):
@@ -1186,38 +1189,31 @@ def build_promotion_candidate_report(
         problem_id = normalize_problem_id(search_payload.get("problem_id", search_path.stem))
         queries = search_payload.get("queries", [])
         for index, result in enumerate(search_payload.get("results", []), start=1):
-            candidate_id = f"{problem_id}-r{index:03d}"
-            promotion_path = root / "reports" / "literature" / "promotions" / f"{candidate_id}.json"
+            candidate = promotion_candidate_from_search_result(
+                root,
+                search_path=search_path,
+                problem_id=problem_id,
+                queries=queries,
+                result=result,
+                result_index=index,
+            )
+            candidate_id = candidate["candidate_id"]
+            promotion_path = root / candidate["promotion_path"]
             already_promoted = promotion_path.exists()
             if already_promoted and not include_promoted:
                 continue
-            review_score = promotion_review_score(result)
+            decision = read_promotion_candidate_decision(root, candidate_id)
+            if decision is not None and not include_decided:
+                continue
+            candidate["status"] = "already_promoted" if already_promoted else "candidate"
+            if decision is not None:
+                candidate["status"] = decision["decision"]
+                candidate["decision"] = decision
+            review_score = int(candidate["review_score"])
             if review_score < min_score:
                 continue
-            dedupe_keys = literature_result_dedupe_keys(result)
             raw_candidates.append(
-                {
-                    "candidate_id": candidate_id,
-                    "problem_id": problem_id,
-                    "result_index": index,
-                    "review_score": review_score,
-                    "relevance_score": int(result.get("relevance_score") or 0),
-                    "source": result.get("source", ""),
-                    "title": result.get("title", ""),
-                    "year": result.get("year", ""),
-                    "identifier": result.get("identifier", ""),
-                    "url": result.get("url", ""),
-                    "venue": result.get("venue", ""),
-                    "relevance_terms": result.get("relevance_terms", []),
-                    "queries": queries,
-                    "abstract_snippet": result.get("abstract_snippet", ""),
-                    "search_path": str(search_path.relative_to(root)),
-                    "promotion_path": str(promotion_path.relative_to(root)),
-                    "status": "already_promoted" if already_promoted else "candidate",
-                    "approve_command": f"python3 -m erdos_agent approve-promotion-candidate {candidate_id}",
-                    "dedupe_key": dedupe_keys[0] if dedupe_keys else f"candidate:{candidate_id}",
-                    "_dedupe_keys": dedupe_keys,
-                }
+                candidate
             )
 
     candidates = dedupe_promotion_candidates(raw_candidates)
@@ -1228,6 +1224,7 @@ def build_promotion_candidate_report(
         "generated_at": date.today().isoformat(),
         "min_score": min_score,
         "include_promoted": include_promoted,
+        "include_decided": include_decided,
         "raw_candidate_count": len(raw_candidates),
         "deduped_candidate_count": deduped_candidate_count,
         "returned": len(candidates),
@@ -1239,6 +1236,43 @@ def build_promotion_candidate_report(
     write_text(md_path, render_promotion_candidate_report(report))
     append_log(root, f"promotion_candidate_report | returned={len(candidates)} | min_score={min_score}")
     return report
+
+
+def promotion_candidate_from_search_result(
+    root: Path,
+    *,
+    search_path: Path,
+    problem_id: str,
+    queries: list[str],
+    result: dict[str, Any],
+    result_index: int,
+) -> dict[str, Any]:
+    candidate_id = f"{problem_id}-r{result_index:03d}"
+    promotion_path = root / "reports" / "literature" / "promotions" / f"{candidate_id}.json"
+    dedupe_keys = literature_result_dedupe_keys(result)
+    return {
+        "candidate_id": candidate_id,
+        "problem_id": problem_id,
+        "result_index": result_index,
+        "review_score": promotion_review_score(result),
+        "relevance_score": int(result.get("relevance_score") or 0),
+        "source": result.get("source", ""),
+        "title": result.get("title", ""),
+        "year": result.get("year", ""),
+        "identifier": result.get("identifier", ""),
+        "url": result.get("url", ""),
+        "venue": result.get("venue", ""),
+        "relevance_terms": result.get("relevance_terms", []),
+        "queries": queries,
+        "abstract_snippet": result.get("abstract_snippet", ""),
+        "search_path": str(search_path.relative_to(root)),
+        "promotion_path": str(promotion_path.relative_to(root)),
+        "status": "already_promoted" if promotion_path.exists() else "candidate",
+        "review_command": f"python3 -m erdos_agent review-promotion-candidate {candidate_id}",
+        "approve_command": f"python3 -m erdos_agent approve-promotion-candidate {candidate_id} --reviewer YOUR_NAME --note \"brief reason\"",
+        "dedupe_key": dedupe_keys[0] if dedupe_keys else f"candidate:{candidate_id}",
+        "_dedupe_keys": dedupe_keys,
+    }
 
 
 def promotion_review_score(result: dict[str, Any]) -> int:
@@ -1303,6 +1337,7 @@ def promotion_candidate_reference(candidate: dict[str, Any]) -> dict[str, Any]:
         "source": candidate.get("source", ""),
         "identifier": candidate.get("identifier", ""),
         "search_path": candidate.get("search_path", ""),
+        "review_command": candidate.get("review_command", ""),
         "approve_command": candidate.get("approve_command", ""),
     }
 
@@ -1336,6 +1371,7 @@ def render_promotion_candidate_report(report: dict[str, Any]) -> str:
                 f"- relevance terms: {', '.join(item.get('relevance_terms', []))}",
                 f"- duplicate matches folded in: {item.get('duplicate_count', 0)}",
                 f"- related problems: {', '.join(item.get('related_problem_ids', []))}",
+                f"- review packet: `{item.get('review_command', '')}`",
                 f"- approve: `{item['approve_command']}`",
                 "",
             ]
@@ -1343,12 +1379,172 @@ def render_promotion_candidate_report(report: dict[str, Any]) -> str:
         for related in item.get("related_candidates", []):
             lines.append(
                 f"- related candidate: {related['candidate_id']} "
-                f"({related['problem_id']}, score {related['review_score']}, {related['source']})"
+                f"({related['problem_id']}, score {related['review_score']}, {related['source']}): "
+                f"`{related.get('review_command') or ('python3 -m erdos_agent review-promotion-candidate ' + related['candidate_id'])}`"
             )
         if item.get("related_candidates"):
             lines.append("")
         if item.get("abstract_snippet"):
             lines.extend([item["abstract_snippet"], ""])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def load_promotion_candidate(root: Path, candidate_id: str) -> dict[str, Any]:
+    report_path = root / "reports" / "literature" / "review" / "promotion_candidates.json"
+    if not report_path.exists():
+        raise FileNotFoundError("No promotion candidate report found; run review-search-results first.")
+    report = read_json(report_path)
+    candidate = next((item for item in report.get("items", []) if item.get("candidate_id") == candidate_id), None)
+    if candidate is not None:
+        return candidate
+
+    for item in report.get("items", []):
+        related = next(
+            (related_item for related_item in item.get("related_candidates", []) if related_item.get("candidate_id") == candidate_id),
+            None,
+        )
+        if related is not None:
+            return load_promotion_candidate_from_search_path(root, related)
+
+    raise ValueError(f"Candidate {candidate_id!r} was not found in {report_path}")
+
+
+def load_promotion_candidate_from_search_path(root: Path, related: dict[str, Any]) -> dict[str, Any]:
+    search_path = root / related["search_path"]
+    search_payload = read_json(search_path)
+    problem_id = normalize_problem_id(search_payload.get("problem_id", search_path.stem))
+    result_index = int(related["result_index"])
+    results = search_payload.get("results", [])
+    if result_index < 1 or result_index > len(results):
+        raise IndexError(f"Result index {result_index} is outside 1..{len(results)} for {search_path}")
+    candidate = promotion_candidate_from_search_result(
+        root,
+        search_path=search_path,
+        problem_id=problem_id,
+        queries=search_payload.get("queries", []),
+        result=results[result_index - 1],
+        result_index=result_index,
+    )
+    candidate.pop("_dedupe_keys", None)
+    candidate["folded_under"] = related.get("folded_under", "")
+    return candidate
+
+
+def read_promotion_candidate_decision(root: Path, candidate_id: str) -> dict[str, Any] | None:
+    path = root / "reports" / "literature" / "review" / "decisions" / f"{candidate_id}.json"
+    if not path.exists():
+        return None
+    return read_json(path)
+
+
+def record_promotion_candidate_decision(
+    root: Path,
+    candidate_id: str,
+    *,
+    decision: str,
+    reviewer: str = "",
+    notes: list[str] | None = None,
+) -> dict[str, Any]:
+    if decision not in {"rejected", "deferred", "needs_more_reading"}:
+        raise ValueError("decision must be one of: rejected, deferred, needs_more_reading")
+    candidate = load_promotion_candidate(root, candidate_id)
+    payload = {
+        "generated_at": date.today().isoformat(),
+        "candidate_id": candidate_id,
+        "decision": decision,
+        "reviewer": reviewer,
+        "notes": notes or [],
+        "candidate_snapshot": candidate,
+    }
+    path = root / "reports" / "literature" / "review" / "decisions" / f"{candidate_id}.json"
+    write_json(path, payload)
+    append_log(root, f"promotion_candidate_decision | {candidate_id} | decision={decision}")
+    return {
+        "decision": payload,
+        "artifacts": [str(path.relative_to(root))],
+    }
+
+
+def build_promotion_candidate_packet(root: Path, candidate_id: str) -> dict[str, Any]:
+    candidate = load_promotion_candidate(root, candidate_id)
+    packet = {
+        "generated_at": date.today().isoformat(),
+        "candidate_id": candidate_id,
+        "candidate": candidate,
+        "review_checks": [
+            "Open the source URL/DOI/arXiv page and confirm the title, authors, and venue.",
+            "Read enough of the abstract or paper to decide whether the match is mathematical, not only keyword overlap.",
+            "Compare the result with the local problem statement and note whether it is a solution, partial result, method, or false lead.",
+            "Check whether related folded candidates point to the same paper or to nearby variants.",
+            "Only approve if a human reviewer is comfortable recording this as an unreviewed finding for pivoting.",
+        ],
+        "suggested_commands": {
+            "approve_only": f"python3 -m erdos_agent approve-promotion-candidate {candidate_id} --reviewer YOUR_NAME --note \"brief reason\"",
+            "approve_and_queue": f"python3 -m erdos_agent approve-promotion-candidate {candidate_id} --reviewer YOUR_NAME --note \"brief reason\" --queue-pivots --queue-limit 3 --queue-min-score 10",
+        },
+        "safety_notes": [
+            "This packet is source-aware and must not be passed to Blind Solver.",
+            "Approval records a useful literature finding; it is not a novelty claim.",
+            "External posting remains a separate human-only action.",
+        ],
+    }
+    json_path = root / "reports" / "literature" / "review" / "packets" / f"{candidate_id}.json"
+    md_path = root / "reports" / "literature" / "review" / "packets" / f"{candidate_id}.md"
+    write_json(json_path, packet)
+    write_text(md_path, render_promotion_candidate_packet(packet))
+    append_log(root, f"promotion_candidate_packet | {candidate_id}")
+    return {
+        "packet": packet,
+        "artifacts": [str(json_path.relative_to(root)), str(md_path.relative_to(root))],
+    }
+
+
+def render_promotion_candidate_packet(packet: dict[str, Any]) -> str:
+    candidate = packet["candidate"]
+    lines = [
+        f"# Promotion Candidate Packet: {packet['candidate_id']}",
+        "",
+        f"Generated: {packet['generated_at']}",
+        "",
+        "This is a source-aware human review packet. Do not pass it to Blind Solver.",
+        "",
+        "## Candidate",
+        "",
+        f"- status: {candidate.get('status', '')}",
+        f"- problem: {candidate.get('problem_id', '')}",
+        f"- result index: {candidate.get('result_index', '')}",
+        f"- review score: {candidate.get('review_score', '')}",
+        f"- source: {candidate.get('source', '')}",
+        f"- year: {candidate.get('year', '')}",
+        f"- title: {candidate.get('title') or 'Untitled'}",
+        f"- id: {candidate.get('identifier', '')}",
+        f"- url: {candidate.get('url', '')}",
+        f"- venue: {candidate.get('venue', '')}",
+        f"- relevance terms: {', '.join(candidate.get('relevance_terms', []))}",
+        f"- search artifact: {candidate.get('search_path', '')}",
+        "",
+    ]
+    if candidate.get("queries"):
+        lines.extend(["## Search Queries", ""])
+        lines.extend(f"- {query}" for query in candidate["queries"])
+        lines.append("")
+    if candidate.get("related_candidates"):
+        lines.extend(["## Folded Related Candidates", ""])
+        for related in candidate["related_candidates"]:
+            lines.append(
+                f"- {related['candidate_id']} ({related['problem_id']}, score {related['review_score']}, "
+                f"{related['source']}): `{related.get('review_command') or ('python3 -m erdos_agent review-promotion-candidate ' + related['candidate_id'])}`"
+            )
+        lines.append("")
+    if candidate.get("abstract_snippet"):
+        lines.extend(["## Abstract Snippet", "", candidate["abstract_snippet"], ""])
+    lines.extend(["## Human Review Checklist", ""])
+    lines.extend(f"- [ ] {check}" for check in packet["review_checks"])
+    lines.extend(["", "## Suggested Commands", ""])
+    lines.append(f"- approve only: `{packet['suggested_commands']['approve_only']}`")
+    lines.append(f"- approve and queue: `{packet['suggested_commands']['approve_and_queue']}`")
+    lines.extend(["", "## Safety Notes", ""])
+    lines.extend(f"- {note}" for note in packet["safety_notes"])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -1362,14 +1558,10 @@ def approve_promotion_candidate(
     queue_limit: int = 3,
     queue_min_score: int = 10,
     agent: str = "auto",
+    reviewer: str = "",
+    review_notes: list[str] | None = None,
 ) -> dict[str, Any]:
-    report_path = root / "reports" / "literature" / "review" / "promotion_candidates.json"
-    if not report_path.exists():
-        raise FileNotFoundError("No promotion candidate report found; run review-search-results first.")
-    report = read_json(report_path)
-    candidate = next((item for item in report.get("items", []) if item.get("candidate_id") == candidate_id), None)
-    if candidate is None:
-        raise ValueError(f"Candidate {candidate_id!r} was not found in {report_path}")
+    candidate = load_promotion_candidate(root, candidate_id)
 
     promotion_result = promote_literature_search_result(
         root,
@@ -1391,6 +1583,9 @@ def approve_promotion_candidate(
         "generated_at": date.today().isoformat(),
         "candidate_id": candidate_id,
         "status": "approved",
+        "reviewer": reviewer,
+        "review_notes": review_notes or [],
+        "candidate_snapshot": candidate,
         "finding_id": promotion_result["finding"]["finding_id"],
         "promotion_artifacts": promotion_result["artifacts"],
         "queued_run_ids": [run["run_id"] for run in queued_runs],

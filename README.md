@@ -132,10 +132,22 @@ python3 -m erdos_agent literature-search 9 --source arxiv --source crossref --li
 python3 -m erdos_agent review-search-results --limit 20 --min-score 7
 ```
 
+候補1件の人間レビュー用packetを作る場合:
+
+```bash
+python3 -m erdos_agent review-promotion-candidate ep0009-r001
+```
+
+候補を承認せずに除外・保留として記録する場合:
+
+```bash
+python3 -m erdos_agent mark-promotion-candidate ep0009-r001 --decision rejected --reviewer YOUR_NAME --note "keyword match only"
+```
+
 レビュー済み候補を承認してfinding化し、そのままpivot候補を作る場合:
 
 ```bash
-python3 -m erdos_agent approve-promotion-candidate ep0009-r001 --pivot-limit 20
+python3 -m erdos_agent approve-promotion-candidate ep0009-r001 --reviewer YOUR_NAME --note "brief reason" --pivot-limit 20
 ```
 
 個別の検索結果を直接unreviewed findingに変換する場合:
@@ -185,7 +197,8 @@ Codexオートメーションやマルチエージェント用に、JSON jobを 
 python3 -m erdos_agent create-run --problem 25 --agent literature
 python3 -m erdos_agent create-run --from-triage --agent literature --action literature_review --limit 5
 python3 -m erdos_agent review-search-results --limit 20 --min-score 7
-python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --queue-pivots --queue-limit 3 --queue-min-score 10
+python3 -m erdos_agent review-promotion-candidate CANDIDATE_ID
+python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --reviewer YOUR_NAME --note "brief reason" --queue-pivots --queue-limit 3 --queue-min-score 10
 python3 -m erdos_agent queue-pivots FINDING_ID --agent auto --limit 3 --min-score 10
 python3 -m erdos_agent quickstart-check
 python3 -m erdos_agent list-runs --status queued

@@ -5,6 +5,7 @@ from pathlib import Path
 import erdos_agent.core as core
 from erdos_agent.core import (
     approve_promotion_candidate,
+    build_promotion_candidate_packet,
     build_promotion_candidate_report,
     complete_agent_run,
     create_agent_run,
@@ -29,6 +30,7 @@ from erdos_agent.core import (
     quickstart_check,
     record_literature_finding,
     record_math_example,
+    record_promotion_candidate_decision,
     redact_solver_facing_text,
     render_anonymous_result_cards,
     render_literature_search_markdown,
@@ -457,6 +459,78 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(report["items"][0]["duplicate_count"], 1)
             self.assertEqual(report["items"][0]["related_problem_ids"], ["ep0001", "ep0002"])
             self.assertEqual(report["items"][0]["related_candidates"][0]["candidate_id"], "ep0002-r001")
+            folded_packet = build_promotion_candidate_packet(root, "ep0002-r001")
+            self.assertEqual(folded_packet["packet"]["candidate"]["problem_id"], "ep0002")
+
+    def test_build_promotion_candidate_packet_includes_review_gate_details(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "reports/literature/search/ep0001.json",
+                {
+                    "problem_id": "ep0001",
+                    "queries": ["sidon systems"],
+                    "results": [
+                        {
+                            "source": "crossref",
+                            "title": "The structure of Sidon set systems",
+                            "identifier": "10.5817/cz.muni.eurocomb23-114",
+                            "url": "https://doi.org/10.5817/cz.muni.eurocomb23-114",
+                            "abstract_snippet": "A useful abstract.",
+                            "relevance_terms": ["sidon", "systems"],
+                            "relevance_score": 4,
+                        }
+                    ],
+                },
+            )
+            build_promotion_candidate_report(root, min_score=1)
+
+            packet = build_promotion_candidate_packet(root, "ep0001-r001")
+
+            self.assertEqual(packet["packet"]["candidate_id"], "ep0001-r001")
+            self.assertIn("reports/literature/review/packets/ep0001-r001.md", packet["artifacts"])
+            content = (root / "reports/literature/review/packets/ep0001-r001.md").read_text(encoding="utf-8")
+            self.assertIn("Human Review Checklist", content)
+            self.assertIn("Approval records a useful literature finding; it is not a novelty claim.", content)
+
+    def test_record_promotion_candidate_decision_hides_decided_by_default(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "reports/literature/search/ep0001.json",
+                {
+                    "problem_id": "ep0001",
+                    "queries": ["prime additive basis"],
+                    "results": [
+                        {
+                            "source": "crossref",
+                            "title": "A false lead",
+                            "identifier": "10.1000/false-lead",
+                            "abstract_snippet": "A useful abstract.",
+                            "relevance_terms": ["prime", "additive", "basis"],
+                            "relevance_score": 3,
+                        }
+                    ],
+                },
+            )
+            build_promotion_candidate_report(root, min_score=1)
+
+            decision = record_promotion_candidate_decision(
+                root,
+                "ep0001-r001",
+                decision="rejected",
+                reviewer="human-a",
+                notes=["keyword match only"],
+            )
+            hidden = build_promotion_candidate_report(root, min_score=1)
+            visible = build_promotion_candidate_report(root, min_score=1, include_decided=True)
+
+            self.assertEqual(decision["decision"]["reviewer"], "human-a")
+            self.assertEqual(hidden["returned"], 0)
+            self.assertEqual(visible["returned"], 1)
+            self.assertEqual(visible["items"][0]["status"], "rejected")
 
     def test_supervisor_step_includes_review_candidate_summary(self):
         with TemporaryDirectory() as tmp:
@@ -578,8 +652,12 @@ class CoreTests(unittest.TestCase):
                 queue_pivots=True,
                 queue_limit=1,
                 queue_min_score=1,
+                reviewer="human-a",
+                review_notes=["looks relevant enough to pivot"],
             )
             self.assertEqual(approval["approval"]["status"], "approved")
+            self.assertEqual(approval["approval"]["reviewer"], "human-a")
+            self.assertEqual(approval["approval"]["review_notes"], ["looks relevant enough to pivot"])
             self.assertEqual(len(approval["queued_runs"]), 1)
             self.assertTrue((root / "reports/literature/review/approvals/ep0001-r001.json").exists())
             self.assertTrue((root / "agent_runs/inbox" / f"{approval['queued_runs'][0]['run_id']}.json").exists())
