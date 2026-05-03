@@ -1280,6 +1280,37 @@ def execute_agent_run(root: Path, run_id: str) -> dict[str, Any]:
     )
 
 
+def execute_next_agent_run(root: Path, *, agent: str | None = None) -> dict[str, Any]:
+    if agent is not None and agent not in AGENT_KINDS:
+        raise ValueError(f"Unknown agent {agent!r}. Expected one of: {', '.join(sorted(AGENT_KINDS))}")
+    queued = list_agent_runs(root, status="queued")
+    if agent is not None:
+        queued = [run for run in queued if run.get("agent") == agent]
+    if not queued:
+        result = {
+            "status": "idle",
+            "summary": "No queued agent runs.",
+            "agent_filter": agent,
+            "generated_at": date.today().isoformat(),
+        }
+        write_json(root / "agent_runs" / "last_run_next.json", result)
+        return result
+    result = execute_agent_run(root, queued[0]["run_id"])
+    write_json(
+        root / "agent_runs" / "last_run_next.json",
+        {
+            "status": result["status"],
+            "summary": result.get("summary", ""),
+            "run_id": result.get("run_id"),
+            "agent": result.get("agent"),
+            "problem_id": result.get("problem_id"),
+            "result_artifacts": result.get("result_artifacts", []),
+            "generated_at": date.today().isoformat(),
+        },
+    )
+    return result
+
+
 def run_literature_worker(root: Path, problem_id: str | int) -> dict[str, Any]:
     problem = load_problem(root, problem_id)
     normalized = problem.get("problem_id") or normalize_problem_id(problem["number"])

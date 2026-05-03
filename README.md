@@ -12,6 +12,7 @@ Codexでエルディッシュ問題を扱うための、最初の小さな研究
 - [Roadmap](docs/roadmap.md): ここから先の実装計画
 - [Collaboration Guide](docs/collaboration.md): 役割分担、queue運用、PR方針、安全ルール
 - [Agent Protocol](docs/agent_protocol.md): multi-agent / Codex automation向けのinbox/outbox契約
+- [Codex Automation](docs/automation.md): `run-next-agent` を定期実行するための設定メモ
 - [Knowledge Base](docs/knowledge_base.md): 数学exampleとMethod Cardを含む知識ベース設計
 
 ## 方針
@@ -153,6 +154,7 @@ python3 -m erdos_agent create-run --from-triage --agent literature --action lite
 python3 -m erdos_agent list-runs --status queued
 python3 -m erdos_agent supervisor-step --limit 5
 python3 -m erdos_agent run-agent RUN_ID
+python3 -m erdos_agent run-next-agent
 python3 -m erdos_agent complete-run RUN_ID --status done --summary "Created literature report" --artifact reports/literature/ep0025.md
 ```
 

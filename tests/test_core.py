@@ -8,6 +8,7 @@ from erdos_agent.core import (
     create_runs_from_triage,
     ensure_workspace,
     execute_agent_run,
+    execute_next_agent_run,
     extract_problem_content_from_html,
     extract_problem_statement_from_html,
     github_record_to_problem,
@@ -311,6 +312,30 @@ class CoreTests(unittest.TestCase):
             completed = execute_agent_run(root, run["run_id"])
             self.assertEqual(completed["status"], "needs_human")
             self.assertTrue(completed["result_artifacts"][0].startswith("packets/blind/"))
+
+    def test_execute_next_agent_run_handles_idle_and_agent_filter(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            idle = execute_next_agent_run(root)
+            self.assertEqual(idle["status"], "idle")
+            write_json(
+                root / "data/problems/ep0001.json",
+                {
+                    "number": 1,
+                    "problem_id": "ep0001",
+                    "statement_raw": "For every integer n >= 2, prove that n^2 >= 2n.",
+                    "tags": [],
+                    "known_references": [],
+                    "oeis": [],
+                },
+            )
+            create_agent_run(root, agent="computation", problem_id=1)
+            still_idle = execute_next_agent_run(root, agent="literature")
+            self.assertEqual(still_idle["status"], "idle")
+            done = execute_next_agent_run(root, agent="computation")
+            self.assertEqual(done["status"], "done")
+            self.assertTrue((root / "agent_runs/last_run_next.json").exists())
 
 
 if __name__ == "__main__":

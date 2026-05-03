@@ -41,6 +41,7 @@ Inspect and complete jobs with:
 python3 -m erdos_agent list-runs --status queued
 python3 -m erdos_agent supervisor-step --limit 5
 python3 -m erdos_agent run-agent RUN_ID
+python3 -m erdos_agent run-next-agent
 python3 -m erdos_agent complete-run RUN_ID --status done --summary "short result" --artifact reports/literature/findings/foo.json
 ```
 
