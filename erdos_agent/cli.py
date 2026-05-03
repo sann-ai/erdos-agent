@@ -23,6 +23,7 @@ from .core import (
     make_statement_audit,
     normalize_problem_id,
     pivot_from_literature_finding,
+    promote_literature_search_result,
     record_literature_finding,
     record_math_example,
     search_literature_for_problem,
@@ -142,6 +143,12 @@ def build_parser() -> argparse.ArgumentParser:
     lit_search_parser.add_argument("--limit", type=int, default=5, help="Results per query/source.")
     lit_search_parser.add_argument("--query-limit", type=int, default=3, help="Number of generated queries to run.")
 
+    promote_parser = subparsers.add_parser("promote-search-result", help="Turn a literature search result into an unreviewed finding and pivot candidates.")
+    promote_parser.add_argument("problem_id")
+    promote_parser.add_argument("--result-index", type=int, default=1, help="1-based index from reports/literature/search/epNNNN.json.")
+    promote_parser.add_argument("--status", action="append", default=["open"], help="Repeatable status filter for pivot targets. Use 'all' to disable filtering.")
+    promote_parser.add_argument("--limit", type=int, default=20, help="Number of pivot candidates to return.")
+
     audit_parser = subparsers.add_parser("audit", help="Generate a statement audit template.")
     audit_parser.add_argument("problem_id")
 
@@ -243,6 +250,10 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "literature-search":
             run_literature_search(root, args)
+            return 0
+
+        if args.command == "promote-search-result":
+            run_promote_search_result(root, args)
             return 0
 
         if args.command == "audit":
@@ -495,6 +506,27 @@ def run_literature_search(root: Path, args: argparse.Namespace) -> None:
         print(f"artifact: {artifact}")
     if result["errors"]:
         print(f"errors: {len(result['errors'])}")
+
+
+def run_promote_search_result(root: Path, args: argparse.Namespace) -> None:
+    result = promote_literature_search_result(
+        root,
+        args.problem_id,
+        result_index=args.result_index,
+        status_filter=parse_status_filter(args.status),
+        limit=args.limit,
+    )
+    finding = result["finding"]
+    pivot = result["pivot"]
+    print(f"Finding id: {finding['finding_id']}")
+    print(f"Pivot candidates: {pivot['returned']}")
+    for artifact in result["artifacts"]:
+        print(f"artifact: {artifact}")
+    for item in pivot["items"][:10]:
+        print(
+            f"{item['problem_id']} pivot={item['pivot_score']} "
+            f"next={item['recommended_next_action']}"
+        )
 
 
 def run_audit(root: Path, problem_id: str) -> None:

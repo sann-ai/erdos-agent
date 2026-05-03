@@ -40,6 +40,20 @@ reports/literature/search/epNNNN.md
 reports/literature/result_cards/epNNNN.md
 ```
 
+Promote a reviewed-enough search result into an unreviewed finding and pivot candidates:
+
+```bash
+python3 -m erdos_agent promote-search-result 9 --result-index 1 --status open --limit 20
+```
+
+Generated artifacts:
+
+```text
+reports/literature/findings/FINDING_ID.json
+reports/pivots/FINDING_ID.json
+reports/literature/promotions/epNNNN-r001.json
+```
+
 ## Artifact Boundaries
 
 Supervisor/source-aware artifacts:
@@ -47,6 +61,8 @@ Supervisor/source-aware artifacts:
 - `reports/literature/search/epNNNN.json`
 - `reports/literature/search/epNNNN.md`
 - `reports/literature/findings/*.json`
+- `reports/literature/promotions/*.json`
+- `reports/pivots/*.json`
 - `kb/wiki/papers/*.md`
 
 Solver-facing artifacts:
@@ -59,7 +75,13 @@ The result cards intentionally omit source URLs, DOIs, authors, venues, and offi
 
 1. Create or run a Literature Agent job.
 2. Inspect source-aware search results.
-3. Convert useful papers or methods into findings:
+3. Convert useful papers or methods into findings. For the semi-automated path:
+
+```bash
+python3 -m erdos_agent promote-search-result 9 --result-index 1 --status open --limit 20
+```
+
+Or record a finding manually:
 
 ```bash
 python3 -m erdos_agent add-finding 9 \
@@ -71,7 +93,7 @@ python3 -m erdos_agent add-finding 9 \
   --example "Example or construction"
 ```
 
-4. If the finding suggests another target, pivot:
+4. If a manually recorded finding suggests another target, pivot:
 
 ```bash
 python3 -m erdos_agent pivot-from-finding ep0009-key24 --status open --limit 20

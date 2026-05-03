@@ -64,7 +64,7 @@ Each output should include:
 
 If a Literature Agent finds a paper, construction, example, or method that looks more useful for a different open problem than the current one, it should:
 
-1. Record the finding with `add-finding`.
-2. Run `pivot-from-finding`.
+1. Record the finding with `promote-search-result` or `add-finding`.
+2. Run `pivot-from-finding` when the finding was created manually.
 3. Put the top pivot candidates in `agent_runs/outbox/`.
 4. Let Supervisor decide whether to switch focus.

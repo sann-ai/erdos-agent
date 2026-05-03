@@ -21,6 +21,7 @@ from erdos_agent.core import (
     parse_arxiv_results,
     parse_crossref_results,
     pivot_from_literature_finding,
+    promote_literature_search_result,
     record_literature_finding,
     record_math_example,
     redact_solver_facing_text,
@@ -305,6 +306,60 @@ class CoreTests(unittest.TestCase):
             )
             result = pivot_from_literature_finding(root, finding["finding_id"], status_filter={"open"})
             self.assertEqual(result["items"][0]["problem_id"], "ep0002")
+
+    def test_promote_literature_search_result_creates_finding_and_pivot(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "data/problems/ep0001.json",
+                {
+                    "number": 1,
+                    "problem_id": "ep0001",
+                    "status_site": "open",
+                    "tags": ["number theory", "additive basis"],
+                    "statement_raw": "Every large integer is a sum of a prime and powers of two.",
+                    "known_references": [],
+                },
+            )
+            write_json(
+                root / "data/problems/ep0002.json",
+                {
+                    "number": 2,
+                    "problem_id": "ep0002",
+                    "status_site": "open",
+                    "tags": ["number theory", "additive basis"],
+                    "statement_raw": "Can every large integer be represented using a prime and a small additive basis?",
+                    "known_references": [],
+                },
+            )
+            write_json(
+                root / "reports/literature/search/ep0001.json",
+                {
+                    "problem_id": "ep0001",
+                    "generated_at": "2026-05-03",
+                    "queries": ["prime additive basis"],
+                    "results": [
+                        {
+                            "source": "crossref",
+                            "title": "A prime additive basis method",
+                            "identifier": "10.1000/example",
+                            "url": "https://doi.org/10.1000/example",
+                            "year": "2024",
+                            "venue": "Journal",
+                            "abstract_snippet": "Uses primes and additive basis constructions.",
+                            "relevance_terms": ["prime", "additive", "basis"],
+                            "relevance_score": 3,
+                        }
+                    ],
+                },
+            )
+            result = promote_literature_search_result(root, 1, status_filter={"open"}, limit=5)
+            finding = result["finding"]
+            self.assertEqual(finding["status"], "unreviewed")
+            self.assertTrue((root / "reports/literature/findings" / f"{finding['finding_id']}.json").exists())
+            self.assertTrue((root / "reports/literature/promotions/ep0001-r001.json").exists())
+            self.assertEqual(result["pivot"]["items"][0]["problem_id"], "ep0002")
 
     def test_record_math_example(self):
         with TemporaryDirectory() as tmp:

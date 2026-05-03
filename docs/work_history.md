@@ -132,6 +132,42 @@ Current behavior:
 - `critic` writes `reports/referee/epNNNN.md`
 - `blind_solver` prepares `packets/blind/*.md` and a manifest, then marks the run as `needs_human`
 
+### External Literature Search
+
+Commit: `1cf5fb3 Add external literature metadata search`
+
+Added:
+
+- `literature-search`
+- arXiv and Crossref metadata search
+- source-aware search artifacts under `reports/literature/search/`
+- solver-facing anonymous Result Cards under `reports/literature/result_cards/`
+- redaction for direct source/status leaks in solver-facing snippets
+
+### Queue-to-Pivot Literature Trial
+
+Added:
+
+- `promote-search-result`
+- promotion artifacts under `reports/literature/promotions/`
+- search-result promotion into `unreviewed` findings
+- automatic `pivot-from-finding` execution after promotion
+
+Trial commands:
+
+```bash
+python3 -m erdos_agent create-run --from-triage --agent literature --action literature_review --limit 3
+python3 -m erdos_agent run-next-agent
+python3 -m erdos_agent promote-search-result 14 --result-index 1 --status open --limit 10
+```
+
+Observed locally:
+
+- Literature jobs for #14, #25, and #51 completed from the queue.
+- Each job produced a literature report, source-aware search JSON/Markdown, and anonymous Result Cards.
+- Promoting the first result for #14 produced an `unreviewed` finding and 10 pivot candidates.
+- Top #14 pivots included #42, #43, #30, #41, and #44.
+
 ## Local State From Trial Runs
 
 The repository ignores generated research artifacts by default:
@@ -155,6 +191,8 @@ During local trials:
 - #9 was used as a transfer seed.
 - #10 appeared as a top transfer/pivot candidate.
 - sample queue jobs were created and processed.
+- #14, #25, and #51 literature jobs were processed from the queue.
+- sample search results were promoted to unreviewed findings and pivot candidates.
 
 These local artifacts may exist on the working machine but are not tracked in Git.
 
@@ -172,5 +210,4 @@ Current default branch:
 main
 ```
 
-The tracked code is a local CLI and workflow substrate. It does not yet call the OpenAI API, Codex automations, Lean, arXiv, Semantic Scholar, MathSciNet, zbMath, or Google Scholar directly.
-
+The tracked code is a local CLI and workflow substrate. It can call arXiv and Crossref metadata APIs. It does not yet call the OpenAI API, Lean, Semantic Scholar, MathSciNet, zbMath, or Google Scholar directly.

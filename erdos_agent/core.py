@@ -30,6 +30,7 @@ DEFAULT_DIRS = [
     "reports/analogies",
     "reports/literature",
     "reports/literature/findings",
+    "reports/literature/promotions",
     "reports/literature/search",
     "reports/literature/result_cards",
     "reports/pivots",
@@ -1061,6 +1062,112 @@ def pivot_from_literature_finding(
     write_json(root / "reports" / "pivots" / f"{finding_id}.json", result)
     append_log(root, f"pivot_from_finding | {finding_id} | returned={len(items)}")
     return result
+
+
+def promote_literature_search_result(
+    root: Path,
+    problem_id: str | int,
+    *,
+    result_index: int = 1,
+    status_filter: set[str] | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    normalized_problem_id = normalize_problem_id(problem_id)
+    search_path = root / "reports" / "literature" / "search" / f"{normalized_problem_id}.json"
+    if not search_path.exists():
+        raise FileNotFoundError(f"No literature search results found at {search_path}")
+
+    search_payload = read_json(search_path)
+    results = search_payload.get("results", [])
+    if result_index < 1 or result_index > len(results):
+        raise IndexError(f"Result index {result_index} is outside 1..{len(results)}")
+
+    problem = load_problem(root, normalized_problem_id)
+    result = results[result_index - 1]
+    paper_key = paper_key_from_search_result(result, result_index=result_index)
+    finding = record_literature_finding(
+        root,
+        problem_id=normalized_problem_id,
+        paper_key=paper_key,
+        title=result.get("title") or f"Search result {result_index}",
+        url=result.get("url", ""),
+        summary=finding_summary_from_search_result(search_payload, result, result_index=result_index),
+        method_tags=method_tags_from_search_result(problem, result),
+        examples=[],
+        relevance=int(result.get("relevance_score") or 3),
+    )
+    pivot = pivot_from_literature_finding(
+        root,
+        finding["finding_id"],
+        status_filter=status_filter,
+        limit=limit,
+    )
+    promotion = {
+        "generated_at": date.today().isoformat(),
+        "problem_id": normalized_problem_id,
+        "search_path": str(search_path.relative_to(root)),
+        "result_index": result_index,
+        "finding_id": finding["finding_id"],
+        "finding_path": f"reports/literature/findings/{finding['finding_id']}.json",
+        "pivot_path": f"reports/pivots/{finding['finding_id']}.json",
+        "pivot_returned": pivot["returned"],
+        "top_pivots": pivot["items"][:5],
+        "status": "needs_human_review",
+    }
+    promotion_path = root / "reports" / "literature" / "promotions" / f"{normalized_problem_id}-r{result_index:03d}.json"
+    write_json(promotion_path, promotion)
+    append_log(root, f"promote_search_result | {normalized_problem_id} | r{result_index:03d} | {finding['finding_id']}")
+    return {
+        "finding": finding,
+        "pivot": pivot,
+        "promotion": promotion,
+        "artifacts": [
+            promotion["finding_path"],
+            promotion["pivot_path"],
+            str(promotion_path.relative_to(root)),
+        ],
+    }
+
+
+def paper_key_from_search_result(result: dict[str, Any], *, result_index: int) -> str:
+    identifier = normalize_space(result.get("identifier", ""))
+    if identifier:
+        return f"{result.get('source', 'result')}-{slugify(identifier)[:40]}"
+    title = normalize_space(result.get("title", ""))
+    if title:
+        return f"{result.get('source', 'result')}-{slugify(title)[:40]}"
+    return f"{result.get('source', 'result')}-r{result_index:03d}"
+
+
+def finding_summary_from_search_result(
+    search_payload: dict[str, Any],
+    result: dict[str, Any],
+    *,
+    result_index: int,
+) -> str:
+    parts = [
+        f"Promoted from literature search result R{result_index:03d}.",
+        f"Source: {result.get('source', 'unknown')}.",
+    ]
+    if result.get("year"):
+        parts.append(f"Year: {result['year']}.")
+    if result.get("venue"):
+        parts.append(f"Venue: {result['venue']}.")
+    if result.get("relevance_terms"):
+        parts.append(f"Relevance terms: {', '.join(result['relevance_terms'])}.")
+    if search_payload.get("queries"):
+        parts.append(f"Search queries: {'; '.join(search_payload['queries'])}.")
+    if result.get("abstract_snippet"):
+        parts.append(f"Abstract snippet: {result['abstract_snippet']}")
+    return " ".join(parts)
+
+
+def method_tags_from_search_result(problem: dict[str, Any], result: dict[str, Any]) -> list[str]:
+    tags = []
+    tags.extend(str(tag).lower() for tag in problem.get("tags", []))
+    tags.extend(str(term).lower() for term in result.get("relevance_terms", []))
+    tags.extend(str(category).lower() for category in result.get("categories", []))
+    return dedupe_strings([tag for tag in tags if tag])
 
 
 def record_math_example(

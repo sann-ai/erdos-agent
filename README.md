@@ -124,6 +124,12 @@ reports/analogies/ep0728.json
 python3 -m erdos_agent literature-search 9 --source arxiv --source crossref --limit 5 --query-limit 3
 ```
 
+検索結果の上位候補をunreviewed findingに変換し、そのままpivot候補を作る場合:
+
+```bash
+python3 -m erdos_agent promote-search-result 9 --result-index 1 --status open --limit 20
+```
+
 ```bash
 python3 -m erdos_agent add-finding 9 \
   --paper-key "Cr71" \
