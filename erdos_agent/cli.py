@@ -27,6 +27,7 @@ from .core import (
     normalize_problem_id,
     pivot_from_literature_finding,
     promote_literature_search_result,
+    quickstart_check,
     record_literature_finding,
     record_math_example,
     search_literature_for_problem,
@@ -52,6 +53,14 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("init", help="Create the local research workspace directories.")
+
+    quickstart_parser = subparsers.add_parser("quickstart-check", help="Run safe local quickstart checks without approving candidates.")
+    quickstart_parser.add_argument("--status", action="append", default=["open"], help="Repeatable status filter for triage. Use 'all' to disable filtering.")
+    quickstart_parser.add_argument("--triage-limit", type=int, default=10)
+    quickstart_parser.add_argument("--review-limit", type=int, default=20)
+    quickstart_parser.add_argument("--min-review-score", type=int, default=7)
+    quickstart_parser.add_argument("--skip-triage", action="store_true")
+    quickstart_parser.add_argument("--skip-review", action="store_true")
 
     new_parser = subparsers.add_parser("new", help="Create a problem JSON from a statement.")
     new_parser.add_argument("number", type=int)
@@ -196,6 +205,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         ensure_workspace(root)
+
+        if args.command == "quickstart-check":
+            run_quickstart_check(root, args)
+            return 0
 
         if args.command == "new":
             statement = read_statement_arg(args.statement, args.statement_file)
@@ -357,6 +370,24 @@ def run_triage_all(root: Path, args: argparse.Namespace) -> None:
             f"{item['problem_id']} score={item['priority_score']} "
             f"next={item['recommended_next_action']} {statement_mark}"
         )
+
+
+def run_quickstart_check(root: Path, args: argparse.Namespace) -> None:
+    report = quickstart_check(
+        root,
+        status_filter=parse_status_filter(args.status),
+        triage_limit=args.triage_limit,
+        review_limit=args.review_limit,
+        min_review_score=args.min_review_score,
+        run_triage=not args.skip_triage,
+        build_review=not args.skip_review,
+    )
+    print("Wrote reports/quickstart/check.json")
+    print("Wrote reports/quickstart/check.md")
+    for check in report["checks"]:
+        print(f"{check['status']}: {check['name']} - {check['detail']}")
+    print(f"Queued: {report['supervisor']['queued_count']}")
+    print(f"Review candidates: {report['review']['candidate_count']}")
 
 
 def parse_status_filter(values: list[str]) -> set[str] | None:

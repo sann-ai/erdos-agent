@@ -36,6 +36,7 @@ The tracked CLI can:
 ```bash
 git status -sb
 python3 -m unittest discover -s tests
+python3 -m erdos_agent quickstart-check
 python3 -m erdos_agent supervisor-step --limit 5
 ```
 
@@ -59,10 +60,10 @@ python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --queue-pivots -
 
 ## Next Good Step
 
-Run the contributor quickstart and refine any rough edges:
+Use `quickstart-check` as the safe local smoke test:
 
 ```bash
-docs/quickstart.md
+python3 -m erdos_agent quickstart-check
 ```
 
-After that, the next useful implementation step is a `quickstart-check` command or Makefile target that wraps the safest non-approval checks.
+The next useful implementation step is improving review candidate scoring and deduplication, especially duplicate arXiv/Crossref hits and same-title Sidon results.

@@ -28,6 +28,7 @@ DEFAULT_DIRS = [
     "notes",
     "reports/triage",
     "reports/analogies",
+    "reports/quickstart",
     "reports/literature",
     "reports/literature/findings",
     "reports/literature/promotions",
@@ -1337,6 +1338,184 @@ def approve_promotion_candidate(
         "approval": approval,
         "artifacts": [str(approval_path.relative_to(root)), *promotion_result["artifacts"]],
     }
+
+
+def quickstart_check(
+    root: Path,
+    *,
+    status_filter: set[str] | None = None,
+    triage_limit: int = 10,
+    review_limit: int = 20,
+    min_review_score: int = 7,
+    run_triage: bool = True,
+    build_review: bool = True,
+) -> dict[str, Any]:
+    ensure_workspace(root)
+    problem_paths = list_problem_paths(root)
+    search_paths = sorted((root / "reports" / "literature" / "search").glob("ep*.json"))
+    checks: list[dict[str, Any]] = []
+    artifacts: list[str] = []
+
+    checks.append(
+        {
+            "name": "local_problem_data",
+            "status": "ok" if problem_paths else "warn",
+            "detail": f"{len(problem_paths)} local problem files found.",
+            "next_action": "Run ingest-github with a small limit." if not problem_paths else "",
+        }
+    )
+
+    triage_summary: dict[str, Any] = {
+        "ran": False,
+        "available": False,
+        "path": "reports/triage/index.json",
+        "returned": 0,
+        "considered": 0,
+    }
+    if run_triage and problem_paths:
+        triage_index = triage_all(root, status_filter=status_filter, limit=triage_limit)
+        triage_summary.update(
+            {
+                "ran": True,
+                "available": True,
+                "returned": triage_index.get("returned", 0),
+                "considered": triage_index.get("considered", 0),
+                "top_problem_ids": [item["problem_id"] for item in triage_index.get("items", [])[:5]],
+            }
+        )
+        artifacts.append("reports/triage/index.json")
+    elif (root / "reports" / "triage" / "index.json").exists():
+        triage_index = read_json(root / "reports" / "triage" / "index.json")
+        triage_summary.update(
+            {
+                "available": True,
+                "returned": triage_index.get("returned", 0),
+                "considered": triage_index.get("considered", 0),
+                "top_problem_ids": [item["problem_id"] for item in triage_index.get("items", [])[:5]],
+            }
+        )
+
+    checks.append(
+        {
+            "name": "triage_index",
+            "status": "ok" if triage_summary["available"] and triage_summary["returned"] else "warn",
+            "detail": f"{triage_summary['returned']} ranked problems available.",
+            "next_action": "Run triage-all after importing problems." if not triage_summary["available"] else "",
+        }
+    )
+
+    checks.append(
+        {
+            "name": "literature_search_results",
+            "status": "ok" if search_paths else "warn",
+            "detail": f"{len(search_paths)} literature search result files found.",
+            "next_action": "Run Literature Agent jobs or literature-search." if not search_paths else "",
+        }
+    )
+
+    review_summary: dict[str, Any] = {
+        "ran": False,
+        "available": False,
+        "path": "reports/literature/review/promotion_candidates.json",
+        "candidate_count": 0,
+    }
+    if build_review and search_paths:
+        review_report = build_promotion_candidate_report(root, limit=review_limit, min_score=min_review_score)
+        review_summary.update(
+            {
+                "ran": True,
+                "available": True,
+                "candidate_count": review_report.get("returned", 0),
+                "top_candidate_ids": [item["candidate_id"] for item in review_report.get("items", [])[:5]],
+            }
+        )
+        artifacts.extend(
+            [
+                "reports/literature/review/promotion_candidates.json",
+                "reports/literature/review/promotion_candidates.md",
+            ]
+        )
+    elif (root / "reports" / "literature" / "review" / "promotion_candidates.json").exists():
+        review_report = read_json(root / "reports" / "literature" / "review" / "promotion_candidates.json")
+        review_summary.update(
+            {
+                "available": True,
+                "candidate_count": review_report.get("returned", 0),
+                "top_candidate_ids": [item["candidate_id"] for item in review_report.get("items", [])[:5]],
+            }
+        )
+
+    checks.append(
+        {
+            "name": "review_candidates",
+            "status": "ok" if review_summary["available"] else "warn",
+            "detail": f"{review_summary['candidate_count']} review candidates available.",
+            "next_action": "Run review-search-results after Literature Agent search results exist." if not review_summary["available"] else "",
+        }
+    )
+
+    supervisor = supervisor_step(root, limit=5)
+    artifacts.append("agent_runs/supervisor_step.json")
+    report = {
+        "generated_at": date.today().isoformat(),
+        "safe": True,
+        "side_effects": [
+            "may write reports/triage/index.json",
+            "may write reports/literature/review/promotion_candidates.*",
+            "writes agent_runs/supervisor_step.json",
+            "does not approve candidates",
+            "does not post externally",
+        ],
+        "problem_count": len(problem_paths),
+        "search_result_count": len(search_paths),
+        "triage": triage_summary,
+        "review": review_summary,
+        "supervisor": {
+            "queued_count": supervisor.get("queued_count", 0),
+            "completed_count": supervisor.get("completed_count", 0),
+            "review_candidates": supervisor.get("review_candidates", {}),
+        },
+        "checks": checks,
+        "artifacts": dedupe_strings(artifacts),
+    }
+    write_json(root / "reports" / "quickstart" / "check.json", report)
+    write_text(root / "reports" / "quickstart" / "check.md", render_quickstart_check(report))
+    return report
+
+
+def render_quickstart_check(report: dict[str, Any]) -> str:
+    lines = [
+        "# Quickstart Check",
+        "",
+        f"Generated: {report['generated_at']}",
+        f"Safe: {report['safe']}",
+        "",
+        "## Checks",
+        "",
+    ]
+    for check in report.get("checks", []):
+        lines.append(f"- {check['status']}: {check['name']} - {check['detail']}")
+        if check.get("next_action"):
+            lines.append(f"  next: {check['next_action']}")
+    lines.extend(
+        [
+            "",
+            "## Summary",
+            "",
+            f"- local problems: {report.get('problem_count', 0)}",
+            f"- search result files: {report.get('search_result_count', 0)}",
+            f"- triage returned: {report.get('triage', {}).get('returned', 0)}",
+            f"- review candidates: {report.get('review', {}).get('candidate_count', 0)}",
+            f"- queued runs: {report.get('supervisor', {}).get('queued_count', 0)}",
+            "",
+            "## Artifacts",
+            "",
+        ]
+    )
+    lines.extend(f"- {artifact}" for artifact in report.get("artifacts", []))
+    lines.extend(["", "## Safety", ""])
+    lines.extend(f"- {item}" for item in report.get("side_effects", []))
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def record_math_example(

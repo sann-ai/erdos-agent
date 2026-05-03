@@ -41,6 +41,14 @@ python3 -m erdos_agent supervisor-step --limit 5
 
 `agent_runs/supervisor_step.json` includes `review_candidates`. If `review_candidates.available` is true, automation should report the top candidates and wait for human approval rather than promoting them automatically.
 
+For a broader safe smoke test, use:
+
+```bash
+python3 -m erdos_agent quickstart-check
+```
+
+This can refresh triage and literature review summaries, but it does not approve candidates or post externally.
+
 ## Suggested Schedule
 
 Start conservative:

@@ -25,6 +25,7 @@ from erdos_agent.core import (
     parse_crossref_results,
     pivot_from_literature_finding,
     promote_literature_search_result,
+    quickstart_check,
     record_literature_finding,
     record_math_example,
     redact_solver_facing_text,
@@ -425,6 +426,46 @@ class CoreTests(unittest.TestCase):
             self.assertTrue(review["available"])
             self.assertEqual(review["candidate_count"], 1)
             self.assertEqual(review["top_candidates"][0]["candidate_id"], "ep0001-r001")
+
+    def test_quickstart_check_runs_safe_local_checks(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "data/problems/ep0001.json",
+                {
+                    "number": 1,
+                    "problem_id": "ep0001",
+                    "status_site": "open",
+                    "tags": ["number theory", "additive basis"],
+                    "statement_raw": "Every large integer is a sum of a prime and powers of two.",
+                    "known_references": [],
+                },
+            )
+            write_json(
+                root / "reports/literature/search/ep0001.json",
+                {
+                    "problem_id": "ep0001",
+                    "queries": ["prime additive basis"],
+                    "results": [
+                        {
+                            "source": "crossref",
+                            "title": "A strong candidate",
+                            "identifier": "10.1000/strong",
+                            "abstract_snippet": "A useful abstract.",
+                            "relevance_terms": ["prime", "additive", "basis", "integers"],
+                            "relevance_score": 4,
+                        }
+                    ],
+                },
+            )
+            report = quickstart_check(root, status_filter={"open"}, triage_limit=5, review_limit=5, min_review_score=1)
+            self.assertTrue(report["safe"])
+            self.assertEqual(report["problem_count"], 1)
+            self.assertEqual(report["triage"]["returned"], 1)
+            self.assertEqual(report["review"]["candidate_count"], 1)
+            self.assertTrue((root / "reports/quickstart/check.json").exists())
+            self.assertTrue((root / "reports/quickstart/check.md").exists())
 
     def test_approve_promotion_candidate_promotes_and_queues(self):
         with TemporaryDirectory() as tmp:

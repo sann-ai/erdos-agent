@@ -27,7 +27,7 @@ Goal: make it easy for a contributor to reproduce the baseline state.
 
 Tasks:
 
-- Add a `make` or script wrapper for common commands.
+- Added `quickstart-check` as a safe wrapper for local quickstart verification.
 - Added a sample end-to-end workflow in `docs/quickstart.md`.
 - Add schema examples for problem JSON, run JSON, finding JSON, example JSON, and claim cards.
 - Add `--dry-run` to commands that write many artifacts.
@@ -187,4 +187,4 @@ The current `transfer-search` is simple. Later versions should cluster problems 
 
 ## Recommended Immediate Next Step
 
-Add a `quickstart-check` command or Makefile target that runs the safe verification parts of `docs/quickstart.md` without approving candidates or creating public-facing claims.
+Improve review candidate scoring and deduplication, especially duplicate arXiv/Crossref hits and same-title results.

@@ -23,6 +23,14 @@ Expected:
 - Tests should pass.
 - `init` should create any missing local artifact directories.
 
+You can also run the safe local checker at any point:
+
+```bash
+python3 -m erdos_agent quickstart-check
+```
+
+It may update triage and review summaries, but it does not approve candidates, queue pivots, or post externally.
+
 ## 1. Import A Small Batch
 
 Fetch a small open-problem sample with statements:
@@ -153,6 +161,7 @@ python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --queue-pivots -
 Check the state:
 
 ```bash
+python3 -m erdos_agent quickstart-check
 python3 -m erdos_agent supervisor-step --limit 5
 git status --short
 ```

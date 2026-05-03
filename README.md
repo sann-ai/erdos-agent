@@ -187,6 +187,7 @@ python3 -m erdos_agent create-run --from-triage --agent literature --action lite
 python3 -m erdos_agent review-search-results --limit 20 --min-score 7
 python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --queue-pivots --queue-limit 3 --queue-min-score 10
 python3 -m erdos_agent queue-pivots FINDING_ID --agent auto --limit 3 --min-score 10
+python3 -m erdos_agent quickstart-check
 python3 -m erdos_agent list-runs --status queued
 python3 -m erdos_agent supervisor-step --limit 5
 python3 -m erdos_agent run-agent RUN_ID

@@ -184,6 +184,7 @@ Observed locally:
 Added:
 
 - `docs/quickstart.md`
+- `quickstart-check`
 - README link to the quickstart
 - handoff note pointing future agents to the quickstart
 
@@ -191,6 +192,7 @@ Purpose:
 
 - Give new contributors a small local workflow from ingest through review-gated literature promotion.
 - Keep approval and external publication as explicit human actions.
+- Provide a safe smoke-test command that refreshes triage/review summaries without approving candidates.
 
 ## Local State From Trial Runs
 
