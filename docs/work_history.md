@@ -188,6 +188,17 @@ Added:
 - README link to the quickstart
 - handoff note pointing future agents to the quickstart
 
+### Review Candidate Deduplication
+
+Added:
+
+- shared literature result dedupe keys for DOI, arXiv IDs, URLs, and normalized titles
+- merge metadata for duplicate arXiv/Crossref search results
+- promotion review deduplication across multiple seed problems
+- `duplicate_count`, `related_candidates`, and `related_problem_ids` in review artifacts
+
+This keeps the Supervisor review page focused when the same paper appears from several searches, while preserving enough provenance for a human to decide which candidate to approve.
+
 Purpose:
 
 - Give new contributors a small local workflow from ingest through review-gated literature promotion.

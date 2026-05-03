@@ -66,4 +66,4 @@ Use `quickstart-check` as the safe local smoke test:
 python3 -m erdos_agent quickstart-check
 ```
 
-The next useful implementation step is improving review candidate scoring and deduplication, especially duplicate arXiv/Crossref hits and same-title Sidon results.
+The next useful workflow step is reviewing one deduplicated candidate, approving it if it looks useful, and checking that approval creates a finding, pivots to similar open problems, and optionally queues follow-up jobs.

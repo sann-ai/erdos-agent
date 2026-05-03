@@ -47,6 +47,8 @@ python3 -m erdos_agent review-search-results --limit 20 --min-score 7
 python3 -m erdos_agent approve-promotion-candidate ep0009-r001 --pivot-limit 20
 ```
 
+The review list deduplicates likely identical papers across arXiv/Crossref and across multiple seed problems. Folded matches remain visible as `related_candidates` and `related_problem_ids`, so a human can still see that one paper may matter for several problems without reviewing the same title repeatedly.
+
 Direct promotion is also available for one-off local trials:
 
 ```bash

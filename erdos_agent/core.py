@@ -1180,7 +1180,7 @@ def build_promotion_candidate_report(
     min_score: int = 1,
     include_promoted: bool = False,
 ) -> dict[str, Any]:
-    candidates: list[dict[str, Any]] = []
+    raw_candidates: list[dict[str, Any]] = []
     for search_path in sorted((root / "reports" / "literature" / "search").glob("ep*.json")):
         search_payload = read_json(search_path)
         problem_id = normalize_problem_id(search_payload.get("problem_id", search_path.stem))
@@ -1194,7 +1194,8 @@ def build_promotion_candidate_report(
             review_score = promotion_review_score(result)
             if review_score < min_score:
                 continue
-            candidates.append(
+            dedupe_keys = literature_result_dedupe_keys(result)
+            raw_candidates.append(
                 {
                     "candidate_id": candidate_id,
                     "problem_id": problem_id,
@@ -1214,15 +1215,21 @@ def build_promotion_candidate_report(
                     "promotion_path": str(promotion_path.relative_to(root)),
                     "status": "already_promoted" if already_promoted else "candidate",
                     "approve_command": f"python3 -m erdos_agent approve-promotion-candidate {candidate_id}",
+                    "dedupe_key": dedupe_keys[0] if dedupe_keys else f"candidate:{candidate_id}",
+                    "_dedupe_keys": dedupe_keys,
                 }
             )
 
+    candidates = dedupe_promotion_candidates(raw_candidates)
     candidates.sort(key=lambda item: (-item["review_score"], item["problem_id"], item["result_index"]))
+    deduped_candidate_count = len(candidates)
     candidates = candidates[:limit]
     report = {
         "generated_at": date.today().isoformat(),
         "min_score": min_score,
         "include_promoted": include_promoted,
+        "raw_candidate_count": len(raw_candidates),
+        "deduped_candidate_count": deduped_candidate_count,
         "returned": len(candidates),
         "items": candidates,
     }
@@ -1242,12 +1249,72 @@ def promotion_review_score(result: dict[str, Any]) -> int:
     return relevance_score + term_bonus + abstract_bonus + identifier_bonus
 
 
+def dedupe_promotion_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: dict[str, int] = {}
+    deduped: list[dict[str, Any]] = []
+    ranked = sorted(candidates, key=lambda item: (-item["review_score"], item["problem_id"], item["result_index"]))
+
+    for candidate in ranked:
+        keys = candidate.get("_dedupe_keys") or [candidate.get("dedupe_key", "")]
+        keys = [str(key) for key in keys if key]
+        duplicate_index = next((seen[key] for key in keys if key in seen), None)
+        if duplicate_index is None:
+            cleaned = dict(candidate)
+            cleaned.pop("_dedupe_keys", None)
+            cleaned["duplicate_count"] = 0
+            cleaned["related_candidates"] = []
+            cleaned["related_problem_ids"] = [cleaned["problem_id"]]
+            cleaned["all_sources"] = dedupe_strings([cleaned.get("source", "")])
+            cleaned["all_identifiers"] = dedupe_strings([cleaned.get("identifier", "")])
+            cleaned["all_urls"] = dedupe_strings([cleaned.get("url", "")])
+            deduped.append(cleaned)
+            current_index = len(deduped) - 1
+            for key in keys:
+                seen[key] = current_index
+            continue
+
+        representative = deduped[duplicate_index]
+        representative["duplicate_count"] = int(representative.get("duplicate_count", 0)) + 1
+        representative["related_candidates"].append(promotion_candidate_reference(candidate))
+        representative["related_problem_ids"] = dedupe_strings(
+            representative.get("related_problem_ids", []) + [candidate["problem_id"]]
+        )
+        representative["all_sources"] = dedupe_strings(
+            representative.get("all_sources", []) + [candidate.get("source", "")]
+        )
+        representative["all_identifiers"] = dedupe_strings(
+            representative.get("all_identifiers", []) + [candidate.get("identifier", "")]
+        )
+        representative["all_urls"] = dedupe_strings(
+            representative.get("all_urls", []) + [candidate.get("url", "")]
+        )
+        for key in keys:
+            seen[key] = duplicate_index
+
+    return deduped
+
+
+def promotion_candidate_reference(candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "candidate_id": candidate.get("candidate_id"),
+        "problem_id": candidate.get("problem_id"),
+        "result_index": candidate.get("result_index"),
+        "review_score": candidate.get("review_score"),
+        "source": candidate.get("source", ""),
+        "identifier": candidate.get("identifier", ""),
+        "search_path": candidate.get("search_path", ""),
+        "approve_command": candidate.get("approve_command", ""),
+    }
+
+
 def render_promotion_candidate_report(report: dict[str, Any]) -> str:
     lines = [
         "# Promotion Candidate Review",
         "",
         f"Generated: {report['generated_at']}",
         f"Returned: {report['returned']}",
+        f"Raw candidates: {report.get('raw_candidate_count', report['returned'])}",
+        f"After dedupe: {report.get('deduped_candidate_count', report['returned'])}",
         "",
         "These are source-aware Supervisor candidates. Review before promotion.",
         "",
@@ -1267,10 +1334,19 @@ def render_promotion_candidate_report(report: dict[str, Any]) -> str:
                 f"- id: {item['identifier']}",
                 f"- url: {item['url']}",
                 f"- relevance terms: {', '.join(item.get('relevance_terms', []))}",
+                f"- duplicate matches folded in: {item.get('duplicate_count', 0)}",
+                f"- related problems: {', '.join(item.get('related_problem_ids', []))}",
                 f"- approve: `{item['approve_command']}`",
                 "",
             ]
         )
+        for related in item.get("related_candidates", []):
+            lines.append(
+                f"- related candidate: {related['candidate_id']} "
+                f"({related['problem_id']}, score {related['review_score']}, {related['source']})"
+            )
+        if item.get("related_candidates"):
+            lines.append("")
         if item.get("abstract_snippet"):
             lines.extend([item["abstract_snippet"], ""])
     return "\n".join(lines).rstrip() + "\n"
@@ -2110,16 +2186,108 @@ def extract_crossref_year(item: dict[str, Any]) -> str:
 
 
 def dedupe_literature_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    seen: set[str] = set()
+    seen: dict[str, int] = {}
     deduped: list[dict[str, Any]] = []
     for result in results:
-        key = result.get("identifier") or result.get("url") or result.get("title", "").lower()
-        key = normalize_space(str(key)).lower()
-        if not key or key in seen:
+        keys = literature_result_dedupe_keys(result)
+        duplicate_index = next((seen[key] for key in keys if key in seen), None)
+        if duplicate_index is not None:
+            deduped[duplicate_index] = merge_literature_results(deduped[duplicate_index], result)
+            for key in keys:
+                seen[key] = duplicate_index
             continue
-        seen.add(key)
+        if not keys:
+            keys = [f"result:{len(deduped)}"]
         deduped.append(result)
+        current_index = len(deduped) - 1
+        for key in keys:
+            seen[key] = current_index
     return deduped
+
+
+def literature_result_dedupe_keys(result: dict[str, Any]) -> list[str]:
+    keys = [
+        canonical_literature_identifier(result.get("identifier", "")),
+        canonical_literature_identifier(result.get("url", "")),
+    ]
+    title_key = canonical_literature_title(result.get("title", ""))
+    if title_key:
+        keys.append(f"title:{title_key}")
+    return dedupe_strings([key for key in keys if key])
+
+
+def canonical_literature_identifier(value: Any) -> str:
+    text = normalize_space(str(value or "")).lower().rstrip(".")
+    if not text:
+        return ""
+    text = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", text)
+    text = re.sub(r"^doi:\s*", "", text)
+    if re.match(r"^10\.\d{4,9}/\S+$", text):
+        return f"doi:{text}"
+    arxiv_match = re.search(r"(?:arxiv:|arxiv\.org/(?:abs|pdf)/)?([a-z.-]+/\d{7}|\d{4}\.\d{4,5})(?:v\d+)?", text)
+    if arxiv_match:
+        return f"arxiv:{arxiv_match.group(1)}"
+    if len(text) >= 6:
+        return f"id:{text}"
+    return ""
+
+
+def canonical_literature_title(value: Any) -> str:
+    title = normalize_space(strip_tags(str(value or ""))).lower()
+    title = re.sub(r"\\[a-zA-Z]+", " ", title)
+    title = re.sub(r"[^a-z0-9]+", " ", title)
+    title = normalize_space(title)
+    if len(title) < 16 or len(title.split()) < 3:
+        return ""
+    return title
+
+
+def merge_literature_results(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    primary, secondary = left, right
+    if literature_result_quality(right) > literature_result_quality(left):
+        primary, secondary = right, left
+
+    merged = dict(primary)
+    for field in ["title", "year", "url", "identifier", "venue", "abstract_snippet"]:
+        if not merged.get(field) and secondary.get(field):
+            merged[field] = secondary[field]
+    if len(str(secondary.get("abstract_snippet", ""))) > len(str(merged.get("abstract_snippet", ""))):
+        merged["abstract_snippet"] = secondary["abstract_snippet"]
+    for field in ["authors", "categories", "relevance_terms"]:
+        merged[field] = dedupe_strings(list(merged.get(field, [])) + list(secondary.get(field, [])))
+    merged["alternate_sources"] = dedupe_strings(
+        list(left.get("alternate_sources", []))
+        + list(right.get("alternate_sources", []))
+        + [left.get("source", ""), right.get("source", "")]
+    )
+    merged["alternate_identifiers"] = dedupe_strings(
+        list(left.get("alternate_identifiers", []))
+        + list(right.get("alternate_identifiers", []))
+        + [left.get("identifier", ""), right.get("identifier", "")]
+    )
+    merged["alternate_urls"] = dedupe_strings(
+        list(left.get("alternate_urls", []))
+        + list(right.get("alternate_urls", []))
+        + [left.get("url", ""), right.get("url", "")]
+    )
+    return merged
+
+
+def literature_result_quality(result: dict[str, Any]) -> int:
+    score = 0
+    identifier = canonical_literature_identifier(result.get("identifier", ""))
+    if identifier.startswith("doi:"):
+        score += 4
+    elif identifier:
+        score += 2
+    if result.get("abstract_snippet"):
+        score += 2
+    if result.get("venue"):
+        score += 1
+    if result.get("url"):
+        score += 1
+    score += min(2, len(result.get("authors", [])) // 2)
+    return score
 
 
 def filter_literature_results(problem: dict[str, Any], results: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2481,6 +2649,8 @@ def review_candidate_summary(root: Path, *, limit: int = 5) -> dict[str, Any]:
             "status": item.get("status"),
             "source": item.get("source"),
             "title": item.get("title", ""),
+            "duplicate_count": item.get("duplicate_count", 0),
+            "related_problem_ids": item.get("related_problem_ids", []),
             "approve_command": item.get("approve_command"),
         }
         for item in report.get("items", [])[:limit]

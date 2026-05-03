@@ -187,4 +187,4 @@ The current `transfer-search` is simple. Later versions should cluster problems 
 
 ## Recommended Immediate Next Step
 
-Improve review candidate scoring and deduplication, especially duplicate arXiv/Crossref hits and same-title results.
+Use the deduplicated review candidate report to approve one high-confidence literature finding, then verify the full loop from approval to `pivot-from-finding` to queued follow-up runs.

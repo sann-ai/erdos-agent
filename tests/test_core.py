@@ -10,6 +10,7 @@ from erdos_agent.core import (
     create_agent_run,
     create_runs_from_pivot,
     create_runs_from_triage,
+    dedupe_literature_results,
     ensure_workspace,
     execute_agent_run,
     execute_next_agent_run,
@@ -398,6 +399,64 @@ class CoreTests(unittest.TestCase):
             included = build_promotion_candidate_report(root, min_score=1, include_promoted=True)
             self.assertEqual(included["items"][0]["candidate_id"], "ep0001-r001")
             self.assertTrue((root / "reports/literature/review/promotion_candidates.md").exists())
+
+    def test_dedupe_literature_results_merges_same_title_across_sources(self):
+        results = dedupe_literature_results(
+            [
+                {
+                    "source": "arxiv",
+                    "title": "The structure of Sidon set systems",
+                    "identifier": "2211.14011v2",
+                    "url": "http://arxiv.org/abs/2211.14011v2",
+                    "venue": "arXiv",
+                    "abstract_snippet": "A useful preprint abstract.",
+                },
+                {
+                    "source": "crossref",
+                    "title": "The Structure of Sidon Set Systems",
+                    "identifier": "10.5817/cz.muni.eurocomb23-114",
+                    "url": "https://doi.org/10.5817/cz.muni.eurocomb23-114",
+                    "venue": "Proceedings",
+                },
+            ]
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertIn("arxiv", results[0]["alternate_sources"])
+        self.assertIn("crossref", results[0]["alternate_sources"])
+        self.assertIn("2211.14011v2", results[0]["alternate_identifiers"])
+        self.assertIn("10.5817/cz.muni.eurocomb23-114", results[0]["alternate_identifiers"])
+
+    def test_build_promotion_candidate_report_dedupes_same_paper_across_problems(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            for problem_id in ["ep0001", "ep0002"]:
+                write_json(
+                    root / f"reports/literature/search/{problem_id}.json",
+                    {
+                        "problem_id": problem_id,
+                        "queries": ["sidon systems"],
+                        "results": [
+                            {
+                                "source": "crossref",
+                                "title": "The structure of Sidon set systems",
+                                "identifier": "10.5817/cz.muni.eurocomb23-114",
+                                "abstract_snippet": "A useful abstract.",
+                                "relevance_terms": ["sidon", "systems", problem_id],
+                                "relevance_score": 4 if problem_id == "ep0001" else 3,
+                            }
+                        ],
+                    },
+                )
+
+            report = build_promotion_candidate_report(root, min_score=1)
+
+            self.assertEqual(report["raw_candidate_count"], 2)
+            self.assertEqual(report["returned"], 1)
+            self.assertEqual(report["items"][0]["duplicate_count"], 1)
+            self.assertEqual(report["items"][0]["related_problem_ids"], ["ep0001", "ep0002"])
+            self.assertEqual(report["items"][0]["related_candidates"][0]["candidate_id"], "ep0002-r001")
 
     def test_supervisor_step_includes_review_candidate_summary(self):
         with TemporaryDirectory() as tmp:
