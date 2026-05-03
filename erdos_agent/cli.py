@@ -27,6 +27,7 @@ from .core import (
     make_statement_audit,
     normalize_problem_id,
     pivot_from_literature_finding,
+    preview_promotion_candidate,
     promote_literature_search_result,
     quickstart_check,
     record_promotion_candidate_decision,
@@ -172,6 +173,14 @@ def build_parser() -> argparse.ArgumentParser:
     review_candidate_parser = subparsers.add_parser("review-promotion-candidate", help="Build a source-aware human review packet for one promotion candidate.")
     review_candidate_parser.add_argument("candidate_id")
 
+    preview_candidate_parser = subparsers.add_parser("preview-promotion-candidate", help="Dry-run approval effects for one promotion candidate.")
+    preview_candidate_parser.add_argument("candidate_id")
+    preview_candidate_parser.add_argument("--status", action="append", default=["open"], help="Repeatable status filter for pivot targets. Use 'all' to disable filtering.")
+    preview_candidate_parser.add_argument("--pivot-limit", type=int, default=20)
+    preview_candidate_parser.add_argument("--queue-limit", type=int, default=3)
+    preview_candidate_parser.add_argument("--queue-min-score", type=int, default=10)
+    preview_candidate_parser.add_argument("--agent", default="auto", choices=["auto", "literature", "blind_solver", "computation", "formalization", "critic", "statement_auditor"])
+
     mark_candidate_parser = subparsers.add_parser("mark-promotion-candidate", help="Record a human review decision without approving a promotion candidate.")
     mark_candidate_parser.add_argument("candidate_id")
     mark_candidate_parser.add_argument("--decision", required=True, choices=["rejected", "deferred", "needs_more_reading"])
@@ -312,6 +321,10 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "review-promotion-candidate":
             run_review_promotion_candidate(root, args)
+            return 0
+
+        if args.command == "preview-promotion-candidate":
+            run_preview_promotion_candidate(root, args)
             return 0
 
         if args.command == "mark-promotion-candidate":
@@ -637,6 +650,24 @@ def run_review_search_results(root: Path, args: argparse.Namespace) -> None:
 def run_review_promotion_candidate(root: Path, args: argparse.Namespace) -> None:
     result = build_promotion_candidate_packet(root, args.candidate_id)
     print(f"Built review packet: {args.candidate_id}")
+    for artifact in result["artifacts"]:
+        print(f"artifact: {artifact}")
+
+
+def run_preview_promotion_candidate(root: Path, args: argparse.Namespace) -> None:
+    result = preview_promotion_candidate(
+        root,
+        args.candidate_id,
+        status_filter=parse_status_filter(args.status),
+        pivot_limit=args.pivot_limit,
+        queue_limit=args.queue_limit,
+        queue_min_score=args.queue_min_score,
+        agent=args.agent,
+    )
+    preview = result["preview"]
+    print(f"Built approval preview: {args.candidate_id}")
+    print(f"Pivot candidates: {preview['pivot_preview']['returned']}")
+    print(f"Queue preview: {preview['queue_preview']['returned']}")
     for artifact in result["artifacts"]:
         print(f"artifact: {artifact}")
 

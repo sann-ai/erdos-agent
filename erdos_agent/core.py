@@ -36,6 +36,7 @@ DEFAULT_DIRS = [
     "reports/literature/review/approvals",
     "reports/literature/review/decisions",
     "reports/literature/review/packets",
+    "reports/literature/review/previews",
     "reports/literature/search",
     "reports/literature/result_cards",
     "reports/pivots",
@@ -1009,6 +1010,30 @@ def pivot_from_literature_finding(
         raise FileNotFoundError(f"No literature finding found at {finding_path}")
     finding = read_json(finding_path)
     source_problem_id = finding.get("problem_id")
+    items = pivot_items_for_finding(root, finding, status_filter=status_filter, limit=limit)
+    result = {
+        "generated_at": date.today().isoformat(),
+        "finding_id": finding_id,
+        "source_problem_id": source_problem_id,
+        "paper_key": finding.get("paper_key", ""),
+        "title": finding.get("title", ""),
+        "status_filter": sorted(status_filter) if status_filter else [],
+        "returned": len(items),
+        "items": items,
+    }
+    write_json(root / "reports" / "pivots" / f"{finding_id}.json", result)
+    append_log(root, f"pivot_from_finding | {finding_id} | returned={len(items)}")
+    return result
+
+
+def pivot_items_for_finding(
+    root: Path,
+    finding: dict[str, Any],
+    *,
+    status_filter: set[str] | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    source_problem_id = finding.get("problem_id")
     items: list[dict[str, Any]] = []
     query_tokens = math_tokens(" ".join([
         finding.get("title", ""),
@@ -1053,20 +1078,7 @@ def pivot_from_literature_finding(
         )
 
     items.sort(key=lambda item: (-item["pivot_score"], item["number"]))
-    items = items[:limit]
-    result = {
-        "generated_at": date.today().isoformat(),
-        "finding_id": finding_id,
-        "source_problem_id": source_problem_id,
-        "paper_key": finding.get("paper_key", ""),
-        "title": finding.get("title", ""),
-        "status_filter": sorted(status_filter) if status_filter else [],
-        "returned": len(items),
-        "items": items,
-    }
-    write_json(root / "reports" / "pivots" / f"{finding_id}.json", result)
-    append_log(root, f"pivot_from_finding | {finding_id} | returned={len(items)}")
-    return result
+    return items[:limit]
 
 
 def promote_literature_search_result(
@@ -1479,6 +1491,7 @@ def build_promotion_candidate_packet(root: Path, candidate_id: str) -> dict[str,
             "Only approve if a human reviewer is comfortable recording this as an unreviewed finding for pivoting.",
         ],
         "suggested_commands": {
+            "preview": f"python3 -m erdos_agent preview-promotion-candidate {candidate_id} --queue-limit 3 --queue-min-score 10",
             "approve_only": f"python3 -m erdos_agent approve-promotion-candidate {candidate_id} --reviewer YOUR_NAME --note \"brief reason\"",
             "approve_and_queue": f"python3 -m erdos_agent approve-promotion-candidate {candidate_id} --reviewer YOUR_NAME --note \"brief reason\" --queue-pivots --queue-limit 3 --queue-min-score 10",
         },
@@ -1541,10 +1554,211 @@ def render_promotion_candidate_packet(packet: dict[str, Any]) -> str:
     lines.extend(["## Human Review Checklist", ""])
     lines.extend(f"- [ ] {check}" for check in packet["review_checks"])
     lines.extend(["", "## Suggested Commands", ""])
+    lines.append(f"- preview: `{packet['suggested_commands']['preview']}`")
     lines.append(f"- approve only: `{packet['suggested_commands']['approve_only']}`")
     lines.append(f"- approve and queue: `{packet['suggested_commands']['approve_and_queue']}`")
     lines.extend(["", "## Safety Notes", ""])
     lines.extend(f"- {note}" for note in packet["safety_notes"])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def preview_promotion_candidate(
+    root: Path,
+    candidate_id: str,
+    *,
+    status_filter: set[str] | None = None,
+    pivot_limit: int = 20,
+    queue_limit: int = 3,
+    queue_min_score: int = 10,
+    agent: str = "auto",
+) -> dict[str, Any]:
+    candidate = load_promotion_candidate(root, candidate_id)
+    finding = promotion_candidate_finding_preview(root, candidate)
+    pivot_items = pivot_items_for_finding(root, finding, status_filter=status_filter, limit=pivot_limit)
+    queue_preview = preview_runs_from_pivot_items(
+        root,
+        finding_id=finding["finding_id"],
+        pivot_items=pivot_items,
+        agent=agent,
+        limit=queue_limit,
+        min_score=queue_min_score,
+    )
+    preview = {
+        "generated_at": date.today().isoformat(),
+        "candidate_id": candidate_id,
+        "status": "preview_only",
+        "writes": {
+            "creates_literature_finding": False,
+            "creates_pivot_report": False,
+            "creates_agent_runs": False,
+            "posts_externally": False,
+        },
+        "candidate": candidate,
+        "finding_preview": finding,
+        "pivot_preview": {
+            "source_problem_id": finding["problem_id"],
+            "status_filter": sorted(status_filter) if status_filter else [],
+            "returned": len(pivot_items),
+            "items": pivot_items,
+        },
+        "queue_preview": {
+            "agent": agent,
+            "queue_limit": queue_limit,
+            "queue_min_score": queue_min_score,
+            "returned": len(queue_preview),
+            "items": queue_preview,
+        },
+        "approval_command": (
+            f"python3 -m erdos_agent approve-promotion-candidate {candidate_id} "
+            f"--reviewer YOUR_NAME --note \"brief reason\" --queue-pivots "
+            f"--queue-limit {queue_limit} --queue-min-score {queue_min_score}"
+        ),
+    }
+    json_path = root / "reports" / "literature" / "review" / "previews" / f"{candidate_id}.json"
+    md_path = root / "reports" / "literature" / "review" / "previews" / f"{candidate_id}.md"
+    write_json(json_path, preview)
+    write_text(md_path, render_promotion_candidate_preview(preview))
+    return {
+        "preview": preview,
+        "artifacts": [str(json_path.relative_to(root)), str(md_path.relative_to(root))],
+    }
+
+
+def promotion_candidate_finding_preview(root: Path, candidate: dict[str, Any]) -> dict[str, Any]:
+    problem_id = normalize_problem_id(candidate["problem_id"])
+    problem = load_problem(root, problem_id)
+    paper_key = paper_key_from_search_result(candidate, result_index=int(candidate["result_index"]))
+    finding_id = slugify(f"{problem_id}-{paper_key}")[:80]
+    summary_parts = [
+        f"Preview from promotion candidate {candidate['candidate_id']}.",
+        f"Source: {candidate.get('source', 'unknown')}.",
+    ]
+    if candidate.get("year"):
+        summary_parts.append(f"Year: {candidate['year']}.")
+    if candidate.get("venue"):
+        summary_parts.append(f"Venue: {candidate['venue']}.")
+    if candidate.get("relevance_terms"):
+        summary_parts.append(f"Relevance terms: {', '.join(candidate['relevance_terms'])}.")
+    if candidate.get("queries"):
+        summary_parts.append(f"Search queries: {'; '.join(candidate['queries'])}.")
+    if candidate.get("abstract_snippet"):
+        summary_parts.append(f"Abstract snippet: {candidate['abstract_snippet']}")
+    return {
+        "finding_id": finding_id,
+        "problem_id": problem_id,
+        "paper_key": paper_key,
+        "title": candidate.get("title") or "Untitled",
+        "url": candidate.get("url", ""),
+        "summary": " ".join(summary_parts),
+        "method_tags": method_tags_from_search_result(problem, candidate),
+        "examples": [],
+        "relevance": int(candidate.get("relevance_score") or 3),
+        "status": "preview_only",
+        "created_at": date.today().isoformat(),
+    }
+
+
+def preview_runs_from_pivot_items(
+    root: Path,
+    *,
+    finding_id: str,
+    pivot_items: list[dict[str, Any]],
+    agent: str = "auto",
+    limit: int = 3,
+    min_score: int = 10,
+) -> list[dict[str, Any]]:
+    runs: list[dict[str, Any]] = []
+    for item in pivot_items:
+        pivot_score = int(item.get("pivot_score") or 0)
+        if pivot_score < min_score:
+            continue
+        recommended_next_action = item.get("recommended_next_action", "")
+        run_agent = agent_for_pivot_action(recommended_next_action) if agent == "auto" else agent
+        artifacts = default_run_artifacts(root, run_agent, item["problem_id"])
+        runs.append(
+            {
+                "agent": run_agent,
+                "problem_id": item["problem_id"],
+                "priority": 2,
+                "prompt": default_run_prompt(run_agent, item["problem_id"], recommended_next_action),
+                "artifacts": artifacts,
+                "metadata": {
+                    "source": "pivot_preview",
+                    "finding_id": finding_id,
+                    "pivot_score": pivot_score,
+                    "recommended_next_action": recommended_next_action,
+                },
+            }
+        )
+        if len(runs) >= limit:
+            break
+    return runs
+
+
+def render_promotion_candidate_preview(preview: dict[str, Any]) -> str:
+    candidate = preview["candidate"]
+    finding = preview["finding_preview"]
+    pivot = preview["pivot_preview"]
+    queue = preview["queue_preview"]
+    lines = [
+        f"# Promotion Candidate Preview: {preview['candidate_id']}",
+        "",
+        f"Generated: {preview['generated_at']}",
+        "",
+        "This is a dry-run preview. It does not create findings, pivot reports, queued runs, or external posts.",
+        "",
+        "## Candidate",
+        "",
+        f"- problem: {candidate.get('problem_id', '')}",
+        f"- title: {candidate.get('title') or 'Untitled'}",
+        f"- source: {candidate.get('source', '')}",
+        f"- id: {candidate.get('identifier', '')}",
+        f"- url: {candidate.get('url', '')}",
+        "",
+        "## Would Create Finding",
+        "",
+        f"- finding id: {finding['finding_id']}",
+        f"- paper key: {finding['paper_key']}",
+        f"- method tags: {', '.join(finding.get('method_tags', [])) or 'none'}",
+        "",
+        "## Pivot Preview",
+        "",
+        f"- returned: {pivot['returned']}",
+        f"- status filter: {', '.join(pivot.get('status_filter', [])) or 'none'}",
+        "",
+    ]
+    for item in pivot.get("items", [])[:10]:
+        lines.extend(
+            [
+                f"### {item['problem_id']}",
+                "",
+                f"- pivot score: {item['pivot_score']}",
+                f"- next action: {item['recommended_next_action']}",
+                f"- tags: {', '.join(item.get('tags', [])) or 'none'}",
+                f"- rationale: {'; '.join(item.get('rationale', [])) or 'none'}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## Queue Preview",
+            "",
+            f"- returned: {queue['returned']}",
+            f"- agent mode: {queue['agent']}",
+            f"- min score: {queue['queue_min_score']}",
+            "",
+        ]
+    )
+    for item in queue.get("items", []):
+        lines.extend(
+            [
+                f"- {item['problem_id']}: {item['agent']} "
+                f"(score {item['metadata']['pivot_score']}, {item['metadata']['recommended_next_action']})",
+            ]
+        )
+    if queue.get("items"):
+        lines.append("")
+    lines.extend(["## Approval Command", "", f"`{preview['approval_command']}`"])
     return "\n".join(lines).rstrip() + "\n"
 
 

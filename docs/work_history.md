@@ -204,8 +204,10 @@ This keeps the Supervisor review page focused when the same paper appears from s
 Added:
 
 - `review-promotion-candidate CANDIDATE_ID`
+- `preview-promotion-candidate CANDIDATE_ID`
 - `mark-promotion-candidate CANDIDATE_ID --decision rejected|deferred|needs_more_reading`
 - source-aware human review packets under `reports/literature/review/packets/`
+- dry-run approval previews under `reports/literature/review/previews/`
 - human review decisions under `reports/literature/review/decisions/`
 - approval metadata fields for `reviewer`, `review_notes`, and a candidate snapshot
 

@@ -50,6 +50,7 @@ Then approve a candidate only after review:
 
 ```bash
 python3 -m erdos_agent review-promotion-candidate CANDIDATE_ID
+python3 -m erdos_agent preview-promotion-candidate CANDIDATE_ID --queue-limit 3 --queue-min-score 10
 python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --reviewer YOUR_NAME --note "brief reason" --pivot-limit 20
 ```
 

@@ -138,6 +138,12 @@ python3 -m erdos_agent review-search-results --limit 20 --min-score 7
 python3 -m erdos_agent review-promotion-candidate ep0009-r001
 ```
 
+承認した場合のpivot/queue候補をdry-runする場合:
+
+```bash
+python3 -m erdos_agent preview-promotion-candidate ep0009-r001 --queue-limit 3 --queue-min-score 10
+```
+
 候補を承認せずに除外・保留として記録する場合:
 
 ```bash

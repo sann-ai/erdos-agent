@@ -130,6 +130,18 @@ Inspect:
 reports/literature/review/packets/CANDIDATE_ID.md
 ```
 
+Preview what approval would do without creating findings, pivots, or queued runs:
+
+```bash
+python3 -m erdos_agent preview-promotion-candidate CANDIDATE_ID --queue-limit 3 --queue-min-score 10
+```
+
+Inspect:
+
+```bash
+reports/literature/review/previews/CANDIDATE_ID.md
+```
+
 If a candidate is not useful, mark the decision so it does not keep resurfacing:
 
 ```bash

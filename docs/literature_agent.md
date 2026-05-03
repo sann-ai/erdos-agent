@@ -45,6 +45,7 @@ Promote a reviewed-enough search result into an unreviewed finding and pivot can
 ```bash
 python3 -m erdos_agent review-search-results --limit 20 --min-score 7
 python3 -m erdos_agent review-promotion-candidate ep0009-r001
+python3 -m erdos_agent preview-promotion-candidate ep0009-r001 --queue-limit 3 --queue-min-score 10
 python3 -m erdos_agent approve-promotion-candidate ep0009-r001 --reviewer YOUR_NAME --note "brief reason" --pivot-limit 20
 ```
 
@@ -71,6 +72,7 @@ reports/literature/promotions/epNNNN-r001.json
 reports/literature/review/promotion_candidates.json
 reports/literature/review/promotion_candidates.md
 reports/literature/review/packets/epNNNN-r001.md
+reports/literature/review/previews/epNNNN-r001.md
 reports/literature/review/decisions/epNNNN-r001.json
 reports/literature/review/approvals/epNNNN-r001.json
 ```
@@ -115,6 +117,7 @@ python3 -m erdos_agent review-search-results --limit 20 --min-score 7
 
 ```bash
 python3 -m erdos_agent review-promotion-candidate ep0009-r001
+python3 -m erdos_agent preview-promotion-candidate ep0009-r001 --queue-limit 3 --queue-min-score 10
 python3 -m erdos_agent approve-promotion-candidate ep0009-r001 --reviewer YOUR_NAME --note "brief reason" --pivot-limit 20
 ```
 

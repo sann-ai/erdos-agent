@@ -68,14 +68,16 @@ If a Literature Agent finds a paper, construction, example, or method that looks
 
 1. Build a review list with `review-search-results`.
 2. Build a source-aware packet with `review-promotion-candidate`.
-3. Approve a reviewed candidate with `approve-promotion-candidate`, mark it with `mark-promotion-candidate`, or record a manual finding with `add-finding`.
-4. Run `pivot-from-finding` when the finding was created manually.
-5. Queue approved top pivot candidates with `queue-pivots`.
-6. Let Supervisor decide whether to run the queued jobs or change focus.
+3. Preview approval effects with `preview-promotion-candidate`.
+4. Approve a reviewed candidate with `approve-promotion-candidate`, mark it with `mark-promotion-candidate`, or record a manual finding with `add-finding`.
+5. Run `pivot-from-finding` when the finding was created manually.
+6. Queue approved top pivot candidates with `queue-pivots`.
+7. Let Supervisor decide whether to run the queued jobs or change focus.
 
 ```bash
 python3 -m erdos_agent review-search-results --limit 20 --min-score 7
 python3 -m erdos_agent review-promotion-candidate CANDIDATE_ID
+python3 -m erdos_agent preview-promotion-candidate CANDIDATE_ID --queue-limit 3 --queue-min-score 10
 python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --reviewer YOUR_NAME --note "brief reason" --pivot-limit 20
 ```
 

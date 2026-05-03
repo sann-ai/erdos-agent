@@ -26,6 +26,7 @@ from erdos_agent.core import (
     parse_arxiv_results,
     parse_crossref_results,
     pivot_from_literature_finding,
+    preview_promotion_candidate,
     promote_literature_search_result,
     quickstart_check,
     record_literature_finding,
@@ -493,6 +494,62 @@ class CoreTests(unittest.TestCase):
             content = (root / "reports/literature/review/packets/ep0001-r001.md").read_text(encoding="utf-8")
             self.assertIn("Human Review Checklist", content)
             self.assertIn("Approval records a useful literature finding; it is not a novelty claim.", content)
+
+    def test_preview_promotion_candidate_does_not_create_finding_or_queue(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "data/problems/ep0001.json",
+                {
+                    "number": 1,
+                    "problem_id": "ep0001",
+                    "status_site": "open",
+                    "tags": ["number theory", "additive basis"],
+                    "statement_raw": "Every large integer is a sum of a prime and powers of two.",
+                    "known_references": [],
+                },
+            )
+            write_json(
+                root / "data/problems/ep0002.json",
+                {
+                    "number": 2,
+                    "problem_id": "ep0002",
+                    "status_site": "open",
+                    "tags": ["number theory", "additive basis"],
+                    "statement_raw": "Can every large integer be represented using a prime and a small additive basis?",
+                    "known_references": [],
+                },
+            )
+            write_json(
+                root / "reports/literature/search/ep0001.json",
+                {
+                    "problem_id": "ep0001",
+                    "queries": ["prime additive basis"],
+                    "results": [
+                        {
+                            "source": "crossref",
+                            "title": "A prime additive basis method",
+                            "identifier": "10.1000/example",
+                            "url": "https://doi.org/10.1000/example",
+                            "abstract_snippet": "Uses primes and additive basis constructions.",
+                            "relevance_terms": ["prime", "additive", "basis"],
+                            "relevance_score": 3,
+                        }
+                    ],
+                },
+            )
+            build_promotion_candidate_report(root, min_score=1)
+
+            preview = preview_promotion_candidate(root, "ep0001-r001", status_filter={"open"}, queue_min_score=1)
+
+            self.assertFalse(preview["preview"]["writes"]["creates_literature_finding"])
+            self.assertEqual(preview["preview"]["pivot_preview"]["items"][0]["problem_id"], "ep0002")
+            self.assertEqual(preview["preview"]["queue_preview"]["items"][0]["problem_id"], "ep0002")
+            self.assertFalse(list((root / "reports/literature/findings").glob("*.json")))
+            self.assertFalse(list((root / "reports/pivots").glob("*.json")))
+            self.assertFalse(list((root / "agent_runs/inbox").glob("*.json")))
+            self.assertTrue((root / "reports/literature/review/previews/ep0001-r001.md").exists())
 
     def test_record_promotion_candidate_decision_hides_decided_by_default(self):
         with TemporaryDirectory() as tmp:
