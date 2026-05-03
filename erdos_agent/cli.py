@@ -9,6 +9,7 @@ from .core import (
     complete_agent_run,
     create_problem,
     create_agent_run,
+    create_runs_from_pivot,
     create_runs_from_triage,
     ensure_workspace,
     execute_agent_run,
@@ -92,6 +93,12 @@ def build_parser() -> argparse.ArgumentParser:
     pivot_parser.add_argument("finding_id")
     pivot_parser.add_argument("--status", action="append", default=["open"])
     pivot_parser.add_argument("--limit", type=int, default=20)
+
+    queue_pivots_parser = subparsers.add_parser("queue-pivots", help="Create agent runs from a pivot report.")
+    queue_pivots_parser.add_argument("finding_id")
+    queue_pivots_parser.add_argument("--agent", default="auto", choices=["auto", "literature", "blind_solver", "computation", "formalization", "critic", "statement_auditor"])
+    queue_pivots_parser.add_argument("--limit", type=int, default=5)
+    queue_pivots_parser.add_argument("--min-score", type=int, default=1)
 
     example_parser = subparsers.add_parser("add-example", help="Store a mathematical example in the knowledge base.")
     example_parser.add_argument("example_id")
@@ -210,6 +217,10 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "pivot-from-finding":
             run_pivot_from_finding(root, args)
+            return 0
+
+        if args.command == "queue-pivots":
+            run_queue_pivots(root, args)
             return 0
 
         if args.command == "add-example":
@@ -380,6 +391,19 @@ def run_pivot_from_finding(root: Path, args: argparse.Namespace) -> None:
             f"{item['problem_id']} pivot={item['pivot_score']} "
             f"next={item['recommended_next_action']}"
         )
+
+
+def run_queue_pivots(root: Path, args: argparse.Namespace) -> None:
+    runs = create_runs_from_pivot(
+        root,
+        args.finding_id,
+        agent=args.agent,
+        limit=args.limit,
+        min_score=args.min_score,
+    )
+    print(f"Created {len(runs)} runs")
+    for run in runs:
+        print(f"{run['run_id']} {run['agent']} {run.get('problem_id')} priority={run.get('priority')}")
 
 
 def run_add_example(root: Path, args: argparse.Namespace) -> None:

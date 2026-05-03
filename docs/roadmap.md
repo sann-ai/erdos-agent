@@ -47,6 +47,7 @@ Tasks:
 - Implemented first external metadata search pass for arXiv and Crossref.
 - Store findings with `add-finding`.
 - Add `promote-search-result` to convert a search result into an unreviewed finding and pivot candidates.
+- Add `queue-pivots` to turn approved pivot candidates into follow-up agent runs.
 - Generate anonymous Result Cards for solver-facing use.
 - Add pivot logic so a strong finding can suggest changing the target problem.
 

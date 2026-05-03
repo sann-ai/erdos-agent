@@ -67,6 +67,7 @@ Uses:
 python3 -m erdos_agent run-agent RUN_ID
 python3 -m erdos_agent add-finding ...
 python3 -m erdos_agent pivot-from-finding ...
+python3 -m erdos_agent queue-pivots FINDING_ID --agent auto --limit 3 --min-score 10
 ```
 
 Should output:
@@ -237,4 +238,3 @@ git status --short
 - Do not publish generated notes without review.
 - Always record caveats and gaps.
 - If a result seems important, create a Claim Card and ask for human review.
-

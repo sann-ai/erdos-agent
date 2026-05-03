@@ -66,5 +66,19 @@ If a Literature Agent finds a paper, construction, example, or method that looks
 
 1. Record the finding with `promote-search-result` or `add-finding`.
 2. Run `pivot-from-finding` when the finding was created manually.
-3. Put the top pivot candidates in `agent_runs/outbox/`.
-4. Let Supervisor decide whether to switch focus.
+3. Queue approved top pivot candidates with `queue-pivots`.
+4. Let Supervisor decide whether to run the queued jobs or change focus.
+
+```bash
+python3 -m erdos_agent queue-pivots FINDING_ID --agent auto --limit 3 --min-score 10
+```
+
+With `--agent auto`, the queue step maps `recommended_next_action` to an agent role:
+
+```text
+literature_review -> literature
+statement_audit -> statement_auditor
+computation / counterexample_search -> computation
+lean_formalization -> formalization
+proof_attempt -> blind_solver
+```

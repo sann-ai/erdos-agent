@@ -1320,6 +1320,64 @@ def create_runs_from_triage(
     return runs
 
 
+def create_runs_from_pivot(
+    root: Path,
+    finding_id: str,
+    *,
+    agent: str = "auto",
+    limit: int = 5,
+    min_score: int = 1,
+) -> list[dict[str, Any]]:
+    pivot_path = root / "reports" / "pivots" / f"{finding_id}.json"
+    if not pivot_path.exists():
+        raise FileNotFoundError(f"No pivot report found at {pivot_path}")
+    pivot = read_json(pivot_path)
+    runs: list[dict[str, Any]] = []
+    for item in pivot.get("items", []):
+        pivot_score = int(item.get("pivot_score") or 0)
+        if pivot_score < min_score:
+            continue
+        recommended_next_action = item.get("recommended_next_action", "")
+        run_agent = agent_for_pivot_action(recommended_next_action) if agent == "auto" else agent
+        prompt = default_run_prompt(run_agent, item["problem_id"], recommended_next_action)
+        artifacts = default_run_artifacts(root, run_agent, item["problem_id"])
+        artifacts.append(str(pivot_path.relative_to(root)))
+        runs.append(
+            create_agent_run(
+                root,
+                agent=run_agent,
+                problem_id=item["problem_id"],
+                prompt=prompt,
+                artifacts=dedupe_strings(artifacts),
+                priority=2,
+                metadata={
+                    "source": "pivot",
+                    "finding_id": finding_id,
+                    "source_problem_id": pivot.get("source_problem_id"),
+                    "paper_key": pivot.get("paper_key"),
+                    "pivot_score": pivot_score,
+                    "recommended_next_action": recommended_next_action,
+                },
+            )
+        )
+        if len(runs) >= limit:
+            break
+    append_log(root, f"queue_pivots | {finding_id} | created={len(runs)} | agent={agent}")
+    return runs
+
+
+def agent_for_pivot_action(recommended_next_action: str) -> str:
+    mapping = {
+        "literature_review": "literature",
+        "statement_audit": "statement_auditor",
+        "computation": "computation",
+        "counterexample_search": "computation",
+        "lean_formalization": "formalization",
+        "proof_attempt": "blind_solver",
+    }
+    return mapping.get(recommended_next_action, "literature")
+
+
 def list_agent_runs(root: Path, *, status: str | None = None) -> list[dict[str, Any]]:
     runs: list[dict[str, Any]] = []
     for directory in [root / "agent_runs" / "inbox", root / "agent_runs" / "outbox"]:

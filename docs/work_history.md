@@ -152,6 +152,7 @@ Added:
 - promotion artifacts under `reports/literature/promotions/`
 - search-result promotion into `unreviewed` findings
 - automatic `pivot-from-finding` execution after promotion
+- `queue-pivots` for turning top pivot candidates into follow-up agent runs
 
 Trial commands:
 
@@ -159,6 +160,7 @@ Trial commands:
 python3 -m erdos_agent create-run --from-triage --agent literature --action literature_review --limit 3
 python3 -m erdos_agent run-next-agent
 python3 -m erdos_agent promote-search-result 14 --result-index 1 --status open --limit 10
+python3 -m erdos_agent queue-pivots ep0014-crossref-10-1142-s179304211550116x --agent auto --limit 3 --min-score 19
 ```
 
 Observed locally:
@@ -167,6 +169,8 @@ Observed locally:
 - Each job produced a literature report, source-aware search JSON/Markdown, and anonymous Result Cards.
 - Promoting the first result for #14 produced an `unreviewed` finding and 10 pivot candidates.
 - Top #14 pivots included #42, #43, #30, #41, and #44.
+- Queueing the top #14 pivots produced Literature jobs for #42 and #43 and a Computation job for #30.
+- Running those queued jobs completed the next-hop literature/computation artifacts locally.
 
 ## Local State From Trial Runs
 
@@ -193,6 +197,7 @@ During local trials:
 - sample queue jobs were created and processed.
 - #14, #25, and #51 literature jobs were processed from the queue.
 - sample search results were promoted to unreviewed findings and pivot candidates.
+- #14 pivot candidates were queued and processed as follow-up agent jobs.
 
 These local artifacts may exist on the working machine but are not tracked in Git.
 

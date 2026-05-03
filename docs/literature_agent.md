@@ -54,6 +54,12 @@ reports/pivots/FINDING_ID.json
 reports/literature/promotions/epNNNN-r001.json
 ```
 
+Queue top pivot candidates as follow-up agent runs:
+
+```bash
+python3 -m erdos_agent queue-pivots FINDING_ID --agent auto --limit 3 --min-score 10
+```
+
 ## Artifact Boundaries
 
 Supervisor/source-aware artifacts:
@@ -99,7 +105,13 @@ python3 -m erdos_agent add-finding 9 \
 python3 -m erdos_agent pivot-from-finding ep0009-key24 --status open --limit 20
 ```
 
-5. Only pass anonymized Result Cards to a Blind Solver.
+5. Queue approved pivot candidates:
+
+```bash
+python3 -m erdos_agent queue-pivots ep0009-key24 --agent auto --limit 3 --min-score 10
+```
+
+6. Only pass anonymized Result Cards to a Blind Solver.
 
 ## Caveats
 

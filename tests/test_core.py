@@ -6,6 +6,7 @@ import erdos_agent.core as core
 from erdos_agent.core import (
     complete_agent_run,
     create_agent_run,
+    create_runs_from_pivot,
     create_runs_from_triage,
     ensure_workspace,
     execute_agent_run,
@@ -436,6 +437,59 @@ class CoreTests(unittest.TestCase):
             )
             self.assertEqual(len(runs), 1)
             self.assertEqual(runs[0]["problem_id"], "ep0025")
+
+    def test_create_runs_from_pivot_uses_auto_agent_mapping(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "data/problems/ep0002.json",
+                {
+                    "number": 2,
+                    "problem_id": "ep0002",
+                    "status_site": "open",
+                    "statement_raw": "A problem needing literature.",
+                },
+            )
+            write_json(
+                root / "data/problems/ep0003.json",
+                {
+                    "number": 3,
+                    "problem_id": "ep0003",
+                    "status_site": "open",
+                    "statement_raw": "A problem needing computation.",
+                },
+            )
+            write_json(
+                root / "reports/pivots/example-finding.json",
+                {
+                    "finding_id": "example-finding",
+                    "source_problem_id": "ep0001",
+                    "paper_key": "Ab24",
+                    "items": [
+                        {
+                            "problem_id": "ep0002",
+                            "pivot_score": 10,
+                            "recommended_next_action": "literature_review",
+                        },
+                        {
+                            "problem_id": "ep0003",
+                            "pivot_score": 9,
+                            "recommended_next_action": "computation",
+                        },
+                        {
+                            "problem_id": "ep0004",
+                            "pivot_score": 1,
+                            "recommended_next_action": "statement_audit",
+                        },
+                    ],
+                },
+            )
+            runs = create_runs_from_pivot(root, "example-finding", agent="auto", limit=5, min_score=5)
+            self.assertEqual([run["agent"] for run in runs], ["literature", "computation"])
+            self.assertEqual(runs[0]["metadata"]["source"], "pivot")
+            self.assertEqual(runs[0]["metadata"]["finding_id"], "example-finding")
+            self.assertIn("reports/pivots/example-finding.json", runs[0]["artifacts"])
 
     def test_execute_literature_agent_run(self):
         with TemporaryDirectory() as tmp:

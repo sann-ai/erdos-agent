@@ -146,6 +146,12 @@ python3 -m erdos_agent add-finding 9 \
 python3 -m erdos_agent pivot-from-finding ep0009-cr71 --status open --limit 20
 ```
 
+上位pivot候補を次のagent runとしてqueueに積む場合:
+
+```bash
+python3 -m erdos_agent queue-pivots ep0009-cr71 --agent auto --limit 3 --min-score 10
+```
+
 ## 数学exampleを保存する
 
 ```bash
@@ -164,6 +170,7 @@ Codexオートメーションやマルチエージェント用に、JSON jobを 
 ```bash
 python3 -m erdos_agent create-run --problem 25 --agent literature
 python3 -m erdos_agent create-run --from-triage --agent literature --action literature_review --limit 5
+python3 -m erdos_agent queue-pivots FINDING_ID --agent auto --limit 3 --min-score 10
 python3 -m erdos_agent list-runs --status queued
 python3 -m erdos_agent supervisor-step --limit 5
 python3 -m erdos_agent run-agent RUN_ID
