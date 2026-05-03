@@ -2258,10 +2258,12 @@ def supervisor_step(root: Path, *, limit: int = 5) -> dict[str, Any]:
     queued = [run for run in list_agent_runs(root, status="queued")]
     completed = [run for run in list_agent_runs(root) if run.get("status") in {"done", "needs_human", "blocked"}]
     next_runs = queued[:limit]
+    review_candidates = review_candidate_summary(root, limit=limit)
     result = {
         "generated_at": date.today().isoformat(),
         "queued_count": len(queued),
         "completed_count": len(completed),
+        "review_candidates": review_candidates,
         "next_runs": [
             {
                 "run_id": run["run_id"],
@@ -2276,6 +2278,42 @@ def supervisor_step(root: Path, *, limit: int = 5) -> dict[str, Any]:
     }
     write_json(root / "agent_runs" / "supervisor_step.json", result)
     return result
+
+
+def review_candidate_summary(root: Path, *, limit: int = 5) -> dict[str, Any]:
+    report_path = root / "reports" / "literature" / "review" / "promotion_candidates.json"
+    relative_path = "reports/literature/review/promotion_candidates.json"
+    if not report_path.exists():
+        return {
+            "available": False,
+            "candidate_count": 0,
+            "path": relative_path,
+            "top_candidates": [],
+            "next_action": "python3 -m erdos_agent review-search-results --limit 20 --min-score 7",
+        }
+
+    report = read_json(report_path)
+    top_candidates = [
+        {
+            "candidate_id": item.get("candidate_id"),
+            "problem_id": item.get("problem_id"),
+            "result_index": item.get("result_index"),
+            "review_score": item.get("review_score"),
+            "status": item.get("status"),
+            "source": item.get("source"),
+            "title": item.get("title", ""),
+            "approve_command": item.get("approve_command"),
+        }
+        for item in report.get("items", [])[:limit]
+    ]
+    return {
+        "available": True,
+        "generated_at": report.get("generated_at"),
+        "candidate_count": report.get("returned", len(report.get("items", []))),
+        "path": relative_path,
+        "top_candidates": top_candidates,
+        "next_action": "Review top_candidates, then run approve-promotion-candidate for selected candidate ids.",
+    }
 
 
 def make_run_id(agent: str, problem_id: str | None) -> str:

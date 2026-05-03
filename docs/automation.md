@@ -33,6 +33,14 @@ Then inspect `agent_runs/last_run_next.json` and summarize whether a job was pro
 Do not post externally. Do not commit generated research artifacts unless explicitly asked.
 ```
 
+When the queue is empty, a Supervisor can inspect pending review work:
+
+```bash
+python3 -m erdos_agent supervisor-step --limit 5
+```
+
+`agent_runs/supervisor_step.json` includes `review_candidates`. If `review_candidates.available` is true, automation should report the top candidates and wait for human approval rather than promoting them automatically.
+
 ## Suggested Schedule
 
 Start conservative:
@@ -70,6 +78,8 @@ The automation only drains jobs. A Supervisor still creates jobs explicitly:
 ```bash
 python3 -m erdos_agent create-run --from-triage --agent literature --action literature_review --limit 3
 python3 -m erdos_agent create-run --from-triage --agent computation --action computation --limit 2
+python3 -m erdos_agent review-search-results --limit 20 --min-score 7
+python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --queue-pivots --queue-limit 3 --queue-min-score 10
 ```
 
 ## Safety

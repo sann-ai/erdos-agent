@@ -151,6 +151,7 @@ Added:
 - `promote-search-result`
 - `review-search-results`
 - `approve-promotion-candidate`
+- `supervisor-step` review candidate summary
 - promotion artifacts under `reports/literature/promotions/`
 - Supervisor review artifacts under `reports/literature/review/`
 - search-result promotion into `unreviewed` findings
@@ -176,6 +177,7 @@ Observed locally:
 - Queueing the top #14 pivots produced Literature jobs for #42 and #43 and a Computation job for #30.
 - Running those queued jobs completed the next-hop literature/computation artifacts locally.
 - A later review gate trial produced 5 source-aware promotion candidates without auto-approving them.
+- `supervisor-step` now reports those pending review candidates even when the queue is empty.
 
 ## Local State From Trial Runs
 

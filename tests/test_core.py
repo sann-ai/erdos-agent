@@ -398,6 +398,34 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(included["items"][0]["candidate_id"], "ep0001-r001")
             self.assertTrue((root / "reports/literature/review/promotion_candidates.md").exists())
 
+    def test_supervisor_step_includes_review_candidate_summary(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "reports/literature/search/ep0001.json",
+                {
+                    "problem_id": "ep0001",
+                    "queries": ["prime additive basis"],
+                    "results": [
+                        {
+                            "source": "crossref",
+                            "title": "A strong candidate",
+                            "identifier": "10.1000/strong",
+                            "abstract_snippet": "A useful abstract.",
+                            "relevance_terms": ["prime", "additive", "basis", "integers"],
+                            "relevance_score": 4,
+                        }
+                    ],
+                },
+            )
+            build_promotion_candidate_report(root, min_score=1)
+            step = supervisor_step(root, limit=3)
+            review = step["review_candidates"]
+            self.assertTrue(review["available"])
+            self.assertEqual(review["candidate_count"], 1)
+            self.assertEqual(review["top_candidates"][0]["candidate_id"], "ep0001-r001")
+
     def test_approve_promotion_candidate_promotes_and_queues(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

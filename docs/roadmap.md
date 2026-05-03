@@ -17,6 +17,7 @@ The project can:
 - search for transfer candidates from a seed problem
 - store literature findings and examples
 - create and execute local agent-run jobs through inbox/outbox JSON files
+- surface pending literature promotion review candidates in `supervisor-step`
 
 ## Near-Term Plan
 

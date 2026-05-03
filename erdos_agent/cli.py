@@ -497,6 +497,13 @@ def run_supervisor_step(root: Path, args: argparse.Namespace) -> None:
     result = supervisor_step(root, limit=args.limit)
     print(f"Wrote {root / 'agent_runs' / 'supervisor_step.json'}")
     print(f"Queued: {result['queued_count']} Completed: {result['completed_count']}")
+    review = result["review_candidates"]
+    if review["available"]:
+        print(f"Review candidates: {review['candidate_count']}")
+        for item in review["top_candidates"]:
+            print(f"review {item['candidate_id']} score={item['review_score']} status={item['status']}")
+    else:
+        print("Review candidates: none; run review-search-results to build a list")
     for run in result["next_runs"]:
         print(f"{run['run_id']} {run['agent']} {run.get('problem_id')}")
 

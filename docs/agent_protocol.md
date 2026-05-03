@@ -47,6 +47,8 @@ python3 -m erdos_agent complete-run RUN_ID --status done --summary "short result
 
 `run-agent` currently uses deterministic MVP workers. It creates structured artifacts for literature, computation, statement audit, formalization, critic, or blind packet handoff; later Codex automations can replace these workers with live model-driven agents while preserving the same inbox/outbox contract.
 
+`supervisor-step` writes `agent_runs/supervisor_step.json`. In addition to queued and completed run counts, it includes `review_candidates` from `reports/literature/review/promotion_candidates.json` when a review list exists.
+
 Each output should include:
 
 ```json
