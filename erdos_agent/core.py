@@ -31,6 +31,8 @@ DEFAULT_DIRS = [
     "reports/literature",
     "reports/literature/findings",
     "reports/literature/promotions",
+    "reports/literature/review",
+    "reports/literature/review/approvals",
     "reports/literature/search",
     "reports/literature/result_cards",
     "reports/pivots",
@@ -1168,6 +1170,173 @@ def method_tags_from_search_result(problem: dict[str, Any], result: dict[str, An
     tags.extend(str(term).lower() for term in result.get("relevance_terms", []))
     tags.extend(str(category).lower() for category in result.get("categories", []))
     return dedupe_strings([tag for tag in tags if tag])
+
+
+def build_promotion_candidate_report(
+    root: Path,
+    *,
+    limit: int = 20,
+    min_score: int = 1,
+    include_promoted: bool = False,
+) -> dict[str, Any]:
+    candidates: list[dict[str, Any]] = []
+    for search_path in sorted((root / "reports" / "literature" / "search").glob("ep*.json")):
+        search_payload = read_json(search_path)
+        problem_id = normalize_problem_id(search_payload.get("problem_id", search_path.stem))
+        queries = search_payload.get("queries", [])
+        for index, result in enumerate(search_payload.get("results", []), start=1):
+            candidate_id = f"{problem_id}-r{index:03d}"
+            promotion_path = root / "reports" / "literature" / "promotions" / f"{candidate_id}.json"
+            already_promoted = promotion_path.exists()
+            if already_promoted and not include_promoted:
+                continue
+            review_score = promotion_review_score(result)
+            if review_score < min_score:
+                continue
+            candidates.append(
+                {
+                    "candidate_id": candidate_id,
+                    "problem_id": problem_id,
+                    "result_index": index,
+                    "review_score": review_score,
+                    "relevance_score": int(result.get("relevance_score") or 0),
+                    "source": result.get("source", ""),
+                    "title": result.get("title", ""),
+                    "year": result.get("year", ""),
+                    "identifier": result.get("identifier", ""),
+                    "url": result.get("url", ""),
+                    "venue": result.get("venue", ""),
+                    "relevance_terms": result.get("relevance_terms", []),
+                    "queries": queries,
+                    "abstract_snippet": result.get("abstract_snippet", ""),
+                    "search_path": str(search_path.relative_to(root)),
+                    "promotion_path": str(promotion_path.relative_to(root)),
+                    "status": "already_promoted" if already_promoted else "candidate",
+                    "approve_command": f"python3 -m erdos_agent approve-promotion-candidate {candidate_id}",
+                }
+            )
+
+    candidates.sort(key=lambda item: (-item["review_score"], item["problem_id"], item["result_index"]))
+    candidates = candidates[:limit]
+    report = {
+        "generated_at": date.today().isoformat(),
+        "min_score": min_score,
+        "include_promoted": include_promoted,
+        "returned": len(candidates),
+        "items": candidates,
+    }
+    json_path = root / "reports" / "literature" / "review" / "promotion_candidates.json"
+    md_path = root / "reports" / "literature" / "review" / "promotion_candidates.md"
+    write_json(json_path, report)
+    write_text(md_path, render_promotion_candidate_report(report))
+    append_log(root, f"promotion_candidate_report | returned={len(candidates)} | min_score={min_score}")
+    return report
+
+
+def promotion_review_score(result: dict[str, Any]) -> int:
+    relevance_score = int(result.get("relevance_score") or 0)
+    term_bonus = min(3, len(result.get("relevance_terms", [])) // 2)
+    abstract_bonus = 1 if result.get("abstract_snippet") else 0
+    identifier_bonus = 1 if result.get("identifier") else 0
+    return relevance_score + term_bonus + abstract_bonus + identifier_bonus
+
+
+def render_promotion_candidate_report(report: dict[str, Any]) -> str:
+    lines = [
+        "# Promotion Candidate Review",
+        "",
+        f"Generated: {report['generated_at']}",
+        f"Returned: {report['returned']}",
+        "",
+        "These are source-aware Supervisor candidates. Review before promotion.",
+        "",
+    ]
+    for item in report.get("items", []):
+        lines.extend(
+            [
+                f"## {item['candidate_id']}",
+                "",
+                f"- status: {item['status']}",
+                f"- problem: {item['problem_id']}",
+                f"- result index: {item['result_index']}",
+                f"- review score: {item['review_score']}",
+                f"- source: {item['source']}",
+                f"- year: {item['year']}",
+                f"- title: {item['title'] or 'Untitled'}",
+                f"- id: {item['identifier']}",
+                f"- url: {item['url']}",
+                f"- relevance terms: {', '.join(item.get('relevance_terms', []))}",
+                f"- approve: `{item['approve_command']}`",
+                "",
+            ]
+        )
+        if item.get("abstract_snippet"):
+            lines.extend([item["abstract_snippet"], ""])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def approve_promotion_candidate(
+    root: Path,
+    candidate_id: str,
+    *,
+    status_filter: set[str] | None = None,
+    pivot_limit: int = 20,
+    queue_pivots: bool = False,
+    queue_limit: int = 3,
+    queue_min_score: int = 10,
+    agent: str = "auto",
+) -> dict[str, Any]:
+    report_path = root / "reports" / "literature" / "review" / "promotion_candidates.json"
+    if not report_path.exists():
+        raise FileNotFoundError("No promotion candidate report found; run review-search-results first.")
+    report = read_json(report_path)
+    candidate = next((item for item in report.get("items", []) if item.get("candidate_id") == candidate_id), None)
+    if candidate is None:
+        raise ValueError(f"Candidate {candidate_id!r} was not found in {report_path}")
+
+    promotion_result = promote_literature_search_result(
+        root,
+        candidate["problem_id"],
+        result_index=int(candidate["result_index"]),
+        status_filter=status_filter,
+        limit=pivot_limit,
+    )
+    queued_runs: list[dict[str, Any]] = []
+    if queue_pivots:
+        queued_runs = create_runs_from_pivot(
+            root,
+            promotion_result["finding"]["finding_id"],
+            agent=agent,
+            limit=queue_limit,
+            min_score=queue_min_score,
+        )
+    approval = {
+        "generated_at": date.today().isoformat(),
+        "candidate_id": candidate_id,
+        "status": "approved",
+        "finding_id": promotion_result["finding"]["finding_id"],
+        "promotion_artifacts": promotion_result["artifacts"],
+        "queued_run_ids": [run["run_id"] for run in queued_runs],
+        "queued_runs": [
+            {
+                "run_id": run["run_id"],
+                "agent": run["agent"],
+                "problem_id": run.get("problem_id"),
+                "priority": run.get("priority"),
+            }
+            for run in queued_runs
+        ],
+    }
+    approval_path = root / "reports" / "literature" / "review" / "approvals" / f"{candidate_id}.json"
+    write_json(approval_path, approval)
+    append_log(root, f"approve_promotion_candidate | {candidate_id} | finding={approval['finding_id']} | queued={len(queued_runs)}")
+    return {
+        "candidate": candidate,
+        "promotion": promotion_result,
+        "queued_runs": queued_runs,
+        "approval": approval,
+        "artifacts": [str(approval_path.relative_to(root)), *promotion_result["artifacts"]],
+    }
 
 
 def record_math_example(

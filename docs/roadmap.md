@@ -46,6 +46,7 @@ Tasks:
 - Generate source-specific query plans for arXiv, OEIS, Google Scholar-style search, and general web search.
 - Implemented first external metadata search pass for arXiv and Crossref.
 - Store findings with `add-finding`.
+- Add `review-search-results` and `approve-promotion-candidate` as a Supervisor review gate.
 - Add `promote-search-result` to convert a search result into an unreviewed finding and pivot candidates.
 - Add `queue-pivots` to turn approved pivot candidates into follow-up agent runs.
 - Generate anonymous Result Cards for solver-facing use.

@@ -4,6 +4,8 @@ from pathlib import Path
 
 import erdos_agent.core as core
 from erdos_agent.core import (
+    approve_promotion_candidate,
+    build_promotion_candidate_report,
     complete_agent_run,
     create_agent_run,
     create_runs_from_pivot,
@@ -361,6 +363,98 @@ class CoreTests(unittest.TestCase):
             self.assertTrue((root / "reports/literature/findings" / f"{finding['finding_id']}.json").exists())
             self.assertTrue((root / "reports/literature/promotions/ep0001-r001.json").exists())
             self.assertEqual(result["pivot"]["items"][0]["problem_id"], "ep0002")
+
+    def test_build_promotion_candidate_report_skips_promoted_and_ranks(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "reports/literature/search/ep0001.json",
+                {
+                    "problem_id": "ep0001",
+                    "queries": ["prime additive basis"],
+                    "results": [
+                        {
+                            "source": "crossref",
+                            "title": "A strong candidate",
+                            "identifier": "10.1000/strong",
+                            "abstract_snippet": "A useful abstract.",
+                            "relevance_terms": ["prime", "additive", "basis", "integers"],
+                            "relevance_score": 4,
+                        },
+                        {
+                            "source": "arxiv",
+                            "title": "Weak candidate",
+                            "relevance_terms": ["prime"],
+                            "relevance_score": 1,
+                        },
+                    ],
+                },
+            )
+            write_json(root / "reports/literature/promotions/ep0001-r001.json", {"status": "needs_human_review"})
+            skipped = build_promotion_candidate_report(root, min_score=1, include_promoted=False)
+            self.assertEqual([item["candidate_id"] for item in skipped["items"]], ["ep0001-r002"])
+            included = build_promotion_candidate_report(root, min_score=1, include_promoted=True)
+            self.assertEqual(included["items"][0]["candidate_id"], "ep0001-r001")
+            self.assertTrue((root / "reports/literature/review/promotion_candidates.md").exists())
+
+    def test_approve_promotion_candidate_promotes_and_queues(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "data/problems/ep0001.json",
+                {
+                    "number": 1,
+                    "problem_id": "ep0001",
+                    "status_site": "open",
+                    "tags": ["number theory", "additive basis"],
+                    "statement_raw": "Every large integer is a sum of a prime and powers of two.",
+                    "known_references": [],
+                },
+            )
+            write_json(
+                root / "data/problems/ep0002.json",
+                {
+                    "number": 2,
+                    "problem_id": "ep0002",
+                    "status_site": "open",
+                    "tags": ["number theory", "additive basis"],
+                    "statement_raw": "Can every large integer be represented using a prime and a small additive basis?",
+                    "known_references": [],
+                },
+            )
+            write_json(
+                root / "reports/literature/search/ep0001.json",
+                {
+                    "problem_id": "ep0001",
+                    "queries": ["prime additive basis"],
+                    "results": [
+                        {
+                            "source": "crossref",
+                            "title": "A prime additive basis method",
+                            "identifier": "10.1000/example",
+                            "url": "https://doi.org/10.1000/example",
+                            "abstract_snippet": "Uses primes and additive basis constructions.",
+                            "relevance_terms": ["prime", "additive", "basis"],
+                            "relevance_score": 3,
+                        }
+                    ],
+                },
+            )
+            build_promotion_candidate_report(root)
+            approval = approve_promotion_candidate(
+                root,
+                "ep0001-r001",
+                status_filter={"open"},
+                queue_pivots=True,
+                queue_limit=1,
+                queue_min_score=1,
+            )
+            self.assertEqual(approval["approval"]["status"], "approved")
+            self.assertEqual(len(approval["queued_runs"]), 1)
+            self.assertTrue((root / "reports/literature/review/approvals/ep0001-r001.json").exists())
+            self.assertTrue((root / "agent_runs/inbox" / f"{approval['queued_runs'][0]['run_id']}.json").exists())
 
     def test_record_math_example(self):
         with TemporaryDirectory() as tmp:

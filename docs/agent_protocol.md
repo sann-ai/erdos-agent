@@ -64,10 +64,16 @@ Each output should include:
 
 If a Literature Agent finds a paper, construction, example, or method that looks more useful for a different open problem than the current one, it should:
 
-1. Record the finding with `promote-search-result` or `add-finding`.
-2. Run `pivot-from-finding` when the finding was created manually.
-3. Queue approved top pivot candidates with `queue-pivots`.
-4. Let Supervisor decide whether to run the queued jobs or change focus.
+1. Build a review list with `review-search-results`.
+2. Approve a reviewed candidate with `approve-promotion-candidate`, or record a manual finding with `add-finding`.
+3. Run `pivot-from-finding` when the finding was created manually.
+4. Queue approved top pivot candidates with `queue-pivots`.
+5. Let Supervisor decide whether to run the queued jobs or change focus.
+
+```bash
+python3 -m erdos_agent review-search-results --limit 20 --min-score 7
+python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --pivot-limit 20
+```
 
 ```bash
 python3 -m erdos_agent queue-pivots FINDING_ID --agent auto --limit 3 --min-score 10

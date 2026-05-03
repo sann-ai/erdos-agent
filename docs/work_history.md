@@ -149,7 +149,10 @@ Added:
 Added:
 
 - `promote-search-result`
+- `review-search-results`
+- `approve-promotion-candidate`
 - promotion artifacts under `reports/literature/promotions/`
+- Supervisor review artifacts under `reports/literature/review/`
 - search-result promotion into `unreviewed` findings
 - automatic `pivot-from-finding` execution after promotion
 - `queue-pivots` for turning top pivot candidates into follow-up agent runs
@@ -159,6 +162,7 @@ Trial commands:
 ```bash
 python3 -m erdos_agent create-run --from-triage --agent literature --action literature_review --limit 3
 python3 -m erdos_agent run-next-agent
+python3 -m erdos_agent review-search-results --limit 10 --min-score 7
 python3 -m erdos_agent promote-search-result 14 --result-index 1 --status open --limit 10
 python3 -m erdos_agent queue-pivots ep0014-crossref-10-1142-s179304211550116x --agent auto --limit 3 --min-score 19
 ```
@@ -171,6 +175,7 @@ Observed locally:
 - Top #14 pivots included #42, #43, #30, #41, and #44.
 - Queueing the top #14 pivots produced Literature jobs for #42 and #43 and a Computation job for #30.
 - Running those queued jobs completed the next-hop literature/computation artifacts locally.
+- A later review gate trial produced 5 source-aware promotion candidates without auto-approving them.
 
 ## Local State From Trial Runs
 

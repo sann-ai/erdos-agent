@@ -6,6 +6,8 @@ from pathlib import Path
 
 from .core import (
     PROBLEMS_YAML_URL,
+    approve_promotion_candidate,
+    build_promotion_candidate_report,
     complete_agent_run,
     create_problem,
     create_agent_run,
@@ -150,6 +152,20 @@ def build_parser() -> argparse.ArgumentParser:
     lit_search_parser.add_argument("--limit", type=int, default=5, help="Results per query/source.")
     lit_search_parser.add_argument("--query-limit", type=int, default=3, help="Number of generated queries to run.")
 
+    review_search_parser = subparsers.add_parser("review-search-results", help="Build a Supervisor review list for literature search results.")
+    review_search_parser.add_argument("--limit", type=int, default=20)
+    review_search_parser.add_argument("--min-score", type=int, default=1)
+    review_search_parser.add_argument("--include-promoted", action="store_true")
+
+    approve_parser = subparsers.add_parser("approve-promotion-candidate", help="Approve a search result candidate, promote it, and optionally queue pivots.")
+    approve_parser.add_argument("candidate_id")
+    approve_parser.add_argument("--status", action="append", default=["open"], help="Repeatable status filter for pivot targets. Use 'all' to disable filtering.")
+    approve_parser.add_argument("--pivot-limit", type=int, default=20)
+    approve_parser.add_argument("--queue-pivots", action="store_true")
+    approve_parser.add_argument("--queue-limit", type=int, default=3)
+    approve_parser.add_argument("--queue-min-score", type=int, default=10)
+    approve_parser.add_argument("--agent", default="auto", choices=["auto", "literature", "blind_solver", "computation", "formalization", "critic", "statement_auditor"])
+
     promote_parser = subparsers.add_parser("promote-search-result", help="Turn a literature search result into an unreviewed finding and pivot candidates.")
     promote_parser.add_argument("problem_id")
     promote_parser.add_argument("--result-index", type=int, default=1, help="1-based index from reports/literature/search/epNNNN.json.")
@@ -261,6 +277,14 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "literature-search":
             run_literature_search(root, args)
+            return 0
+
+        if args.command == "review-search-results":
+            run_review_search_results(root, args)
+            return 0
+
+        if args.command == "approve-promotion-candidate":
+            run_approve_promotion_candidate(root, args)
             return 0
 
         if args.command == "promote-search-result":
@@ -530,6 +554,44 @@ def run_literature_search(root: Path, args: argparse.Namespace) -> None:
         print(f"artifact: {artifact}")
     if result["errors"]:
         print(f"errors: {len(result['errors'])}")
+
+
+def run_review_search_results(root: Path, args: argparse.Namespace) -> None:
+    report = build_promotion_candidate_report(
+        root,
+        limit=args.limit,
+        min_score=args.min_score,
+        include_promoted=args.include_promoted,
+    )
+    print("Wrote reports/literature/review/promotion_candidates.json")
+    print("Wrote reports/literature/review/promotion_candidates.md")
+    print(f"Candidates: {report['returned']}")
+    for item in report["items"][:10]:
+        print(
+            f"{item['candidate_id']} score={item['review_score']} "
+            f"status={item['status']} source={item['source']} title={item['title'][:80]}"
+        )
+
+
+def run_approve_promotion_candidate(root: Path, args: argparse.Namespace) -> None:
+    result = approve_promotion_candidate(
+        root,
+        args.candidate_id,
+        status_filter=parse_status_filter(args.status),
+        pivot_limit=args.pivot_limit,
+        queue_pivots=args.queue_pivots,
+        queue_limit=args.queue_limit,
+        queue_min_score=args.queue_min_score,
+        agent=args.agent,
+    )
+    finding = result["promotion"]["finding"]
+    print(f"Approved candidate: {args.candidate_id}")
+    print(f"Finding id: {finding['finding_id']}")
+    print(f"Queued runs: {len(result['queued_runs'])}")
+    for artifact in result["artifacts"]:
+        print(f"artifact: {artifact}")
+    for run in result["queued_runs"]:
+        print(f"{run['run_id']} {run['agent']} {run.get('problem_id')} priority={run.get('priority')}")
 
 
 def run_promote_search_result(root: Path, args: argparse.Namespace) -> None:

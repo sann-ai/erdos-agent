@@ -65,6 +65,8 @@ Uses:
 
 ```bash
 python3 -m erdos_agent run-agent RUN_ID
+python3 -m erdos_agent review-search-results --limit 20 --min-score 7
+python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --pivot-limit 20
 python3 -m erdos_agent add-finding ...
 python3 -m erdos_agent pivot-from-finding ...
 python3 -m erdos_agent queue-pivots FINDING_ID --agent auto --limit 3 --min-score 10

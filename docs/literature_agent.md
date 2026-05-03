@@ -43,6 +43,13 @@ reports/literature/result_cards/epNNNN.md
 Promote a reviewed-enough search result into an unreviewed finding and pivot candidates:
 
 ```bash
+python3 -m erdos_agent review-search-results --limit 20 --min-score 7
+python3 -m erdos_agent approve-promotion-candidate ep0009-r001 --pivot-limit 20
+```
+
+Direct promotion is also available for one-off local trials:
+
+```bash
 python3 -m erdos_agent promote-search-result 9 --result-index 1 --status open --limit 20
 ```
 
@@ -52,6 +59,9 @@ Generated artifacts:
 reports/literature/findings/FINDING_ID.json
 reports/pivots/FINDING_ID.json
 reports/literature/promotions/epNNNN-r001.json
+reports/literature/review/promotion_candidates.json
+reports/literature/review/promotion_candidates.md
+reports/literature/review/approvals/epNNNN-r001.json
 ```
 
 Queue top pivot candidates as follow-up agent runs:
@@ -68,6 +78,9 @@ Supervisor/source-aware artifacts:
 - `reports/literature/search/epNNNN.md`
 - `reports/literature/findings/*.json`
 - `reports/literature/promotions/*.json`
+- `reports/literature/review/*.json`
+- `reports/literature/review/*.md`
+- `reports/literature/review/approvals/*.json`
 - `reports/pivots/*.json`
 - `kb/wiki/papers/*.md`
 
@@ -81,10 +94,16 @@ The result cards intentionally omit source URLs, DOIs, authors, venues, and offi
 
 1. Create or run a Literature Agent job.
 2. Inspect source-aware search results.
-3. Convert useful papers or methods into findings. For the semi-automated path:
+3. Build a Supervisor review list:
 
 ```bash
-python3 -m erdos_agent promote-search-result 9 --result-index 1 --status open --limit 20
+python3 -m erdos_agent review-search-results --limit 20 --min-score 7
+```
+
+4. Approve a reviewed candidate:
+
+```bash
+python3 -m erdos_agent approve-promotion-candidate ep0009-r001 --pivot-limit 20
 ```
 
 Or record a finding manually:
@@ -99,19 +118,19 @@ python3 -m erdos_agent add-finding 9 \
   --example "Example or construction"
 ```
 
-4. If a manually recorded finding suggests another target, pivot:
+5. If a manually recorded finding suggests another target, pivot:
 
 ```bash
 python3 -m erdos_agent pivot-from-finding ep0009-key24 --status open --limit 20
 ```
 
-5. Queue approved pivot candidates:
+6. Queue approved pivot candidates:
 
 ```bash
 python3 -m erdos_agent queue-pivots ep0009-key24 --agent auto --limit 3 --min-score 10
 ```
 
-6. Only pass anonymized Result Cards to a Blind Solver.
+7. Only pass anonymized Result Cards to a Blind Solver.
 
 ## Caveats
 

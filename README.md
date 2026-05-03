@@ -124,7 +124,19 @@ reports/analogies/ep0728.json
 python3 -m erdos_agent literature-search 9 --source arxiv --source crossref --limit 5 --query-limit 3
 ```
 
-検索結果の上位候補をunreviewed findingに変換し、そのままpivot候補を作る場合:
+複数の検索結果から、Supervisorが見るpromotion候補リストを作る場合:
+
+```bash
+python3 -m erdos_agent review-search-results --limit 20 --min-score 7
+```
+
+レビュー済み候補を承認してfinding化し、そのままpivot候補を作る場合:
+
+```bash
+python3 -m erdos_agent approve-promotion-candidate ep0009-r001 --pivot-limit 20
+```
+
+個別の検索結果を直接unreviewed findingに変換する場合:
 
 ```bash
 python3 -m erdos_agent promote-search-result 9 --result-index 1 --status open --limit 20
@@ -170,6 +182,8 @@ Codexオートメーションやマルチエージェント用に、JSON jobを 
 ```bash
 python3 -m erdos_agent create-run --problem 25 --agent literature
 python3 -m erdos_agent create-run --from-triage --agent literature --action literature_review --limit 5
+python3 -m erdos_agent review-search-results --limit 20 --min-score 7
+python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --queue-pivots --queue-limit 3 --queue-min-score 10
 python3 -m erdos_agent queue-pivots FINDING_ID --agent auto --limit 3 --min-score 10
 python3 -m erdos_agent list-runs --status queued
 python3 -m erdos_agent supervisor-step --limit 5
