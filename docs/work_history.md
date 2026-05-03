@@ -1,0 +1,176 @@
+# Work History
+
+This document records the project state so new collaborators can join without reading the full chat history.
+
+Last updated: 2026-05-03.
+
+## Project Goal
+
+Build a Codex-based research operations system for Erdős Problems.
+
+The goal is not to claim automatic solutions. The system should help humans and agents:
+
+- ingest official problem metadata
+- triage promising targets
+- hide open-problem/source metadata from Blind Solver agents
+- run literature, computation, formalization, and critic workflows
+- store reusable examples and methods
+- create auditable packages before any human-facing claim
+
+## Guiding Principles
+
+- Do not auto-post to Erdős Problems or GitHub issues.
+- Do not claim novelty without literature review.
+- Keep Blind Solver agents source-blind.
+- Keep Supervisor/status-aware review separate from solver attempts.
+- Treat Lean as a verification aid, not as proof that the original informal statement was captured correctly.
+- Prefer small, reviewable artifacts over broad autonomous claims.
+
+## Implemented Milestones
+
+### Initial MVP
+
+Commit: `e797b70 Initial Erdos agent MVP`
+
+Added:
+
+- package skeleton
+- CLI entry point
+- local problem JSON schema
+- blind solver packet generation
+- literature packet generation
+- statement audit template
+- claim card template
+- tests for core packet behavior
+
+Main commands:
+
+```bash
+python3 -m erdos_agent init
+python3 -m erdos_agent new 728 --statement-file statement.txt
+python3 -m erdos_agent pipeline 728
+```
+
+### GitHub Ingest and Triage Ranking
+
+Commit: `fb4cec0 Add GitHub ingest and triage ranking`
+
+Added:
+
+- import from `teorth/erdosproblems` `data/problems.yaml`
+- optional statement fetch from `https://www.erdosproblems.com/latex/<n>`
+- local conversion into `data/problems/epNNNN.json`
+- `triage-all` ranking
+- statement-present checks before blind packet generation
+
+Main commands:
+
+```bash
+python3 -m erdos_agent ingest-github --status open --limit 30 --fetch-statements
+python3 -m erdos_agent triage-all --status open --limit 30
+```
+
+### Transfer and Knowledge Base Workflows
+
+Commit: `2e3a6ab Add transfer and knowledge base workflows`
+
+Added:
+
+- `transfer-search`
+- `add-finding`
+- `pivot-from-finding`
+- `add-example`
+- Karpathy-style LLM Wiki-inspired knowledge base layout
+- first-class mathematical example storage
+- multi-agent protocol documentation
+
+Purpose:
+
+- When a problem is solved or a promising method is found, search for similar open problems.
+- If literature search finds a more promising target, allow Supervisor to pivot.
+- Store examples, constructions, counterexamples, and method notes as reusable research assets.
+
+### Agent Run Queue
+
+Commit: `0d4c970 Add agent run queue`
+
+Added:
+
+- `agent_runs/inbox/*.json`
+- `agent_runs/outbox/*.json`
+- `create-run`
+- `list-runs`
+- `complete-run`
+- `supervisor-step`
+
+Purpose:
+
+- Make Codex automations and multiple human/agent contributors coordinate through durable JSON jobs.
+- Avoid relying on hidden chat state.
+
+### Built-in Agent Run Workers
+
+Commit: `2059603 Add built-in agent run workers`
+
+Added:
+
+- `run-agent RUN_ID`
+- deterministic MVP workers for:
+  - `literature`
+  - `computation`
+  - `statement_auditor`
+  - `formalization`
+  - `critic`
+  - `blind_solver`
+
+Current behavior:
+
+- `literature` writes `reports/literature/epNNNN.md`
+- `computation` writes `computations/epNNNN/README.md`
+- `statement_auditor` writes `reports/statement_audits/epNNNN.md`
+- `formalization` writes `lean/epNNNN/README.md`
+- `critic` writes `reports/referee/epNNNN.md`
+- `blind_solver` prepares `packets/blind/*.md` and a manifest, then marks the run as `needs_human`
+
+## Local State From Trial Runs
+
+The repository ignores generated research artifacts by default:
+
+```text
+data/
+reports/
+packets/
+agent_runs/
+kb/
+computations/
+lean/
+```
+
+This is intentional because the GitHub repository is public. Commit generated artifacts only after deciding they should be shared.
+
+During local trials:
+
+- 30 open problems were imported with statements.
+- triage ranking was generated.
+- #9 was used as a transfer seed.
+- #10 appeared as a top transfer/pivot candidate.
+- sample queue jobs were created and processed.
+
+These local artifacts may exist on the working machine but are not tracked in Git.
+
+## Current Repository Status
+
+Public GitHub repository:
+
+```text
+https://github.com/sann-ai/erdos-agent
+```
+
+Current default branch:
+
+```text
+main
+```
+
+The tracked code is a local CLI and workflow substrate. It does not yet call the OpenAI API, Codex automations, Lean, arXiv, Semantic Scholar, MathSciNet, zbMath, or Google Scholar directly.
+

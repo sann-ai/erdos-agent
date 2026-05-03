@@ -4,6 +4,16 @@ Codexでエルディッシュ問題を扱うための、最初の小さな研究
 
 目的は「いきなり解く」ことではなく、問題の出自や未解決ラベルをSolverから隠したうえで、triage、匿名化パケット、statement audit、claim cardを作ることです。
 
+## Project Docs
+
+多人数で参加する場合は、まずこの順で読んでください。
+
+- [Work History](docs/work_history.md): ここまでに実装したこと、ローカル試行、現在の状態
+- [Roadmap](docs/roadmap.md): ここから先の実装計画
+- [Collaboration Guide](docs/collaboration.md): 役割分担、queue運用、PR方針、安全ルール
+- [Agent Protocol](docs/agent_protocol.md): multi-agent / Codex automation向けのinbox/outbox契約
+- [Knowledge Base](docs/knowledge_base.md): 数学exampleとMethod Cardを含む知識ベース設計
+
 ## 方針
 
 - Solverには問題番号、Erdős Problems由来、open/solved、賞金、URLを渡さない
