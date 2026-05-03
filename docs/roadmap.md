@@ -42,8 +42,9 @@ Goal: move from query suggestions to useful source-aware literature reports.
 
 Tasks:
 
-- Add a `literature-search` command that reads `reports/literature/epNNNN.md`.
+- Add a `literature-search` command that reads local problem data and writes source-aware search artifacts.
 - Generate source-specific query plans for arXiv, OEIS, Google Scholar-style search, and general web search.
+- Implemented first external metadata search pass for arXiv and Crossref.
 - Store findings with `add-finding`.
 - Generate anonymous Result Cards for solver-facing use.
 - Add pivot logic so a strong finding can suggest changing the target problem.
@@ -192,4 +193,3 @@ python3 -m erdos_agent supervisor-step
 ```
 
 Then have one contributor run a Literature Agent job manually and record the result as a finding.
-

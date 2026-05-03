@@ -25,6 +25,7 @@ from .core import (
     pivot_from_literature_finding,
     record_literature_finding,
     record_math_example,
+    search_literature_for_problem,
     score_problem,
     supervisor_step,
     triage_all,
@@ -135,6 +136,12 @@ def build_parser() -> argparse.ArgumentParser:
     lit_parser = subparsers.add_parser("literature-packet", help="Generate an anonymous literature search packet.")
     lit_parser.add_argument("problem_id")
 
+    lit_search_parser = subparsers.add_parser("literature-search", help="Run external literature metadata search for one problem.")
+    lit_search_parser.add_argument("problem_id")
+    lit_search_parser.add_argument("--source", action="append", choices=["arxiv", "crossref"], help="Repeatable source. Defaults to arxiv and crossref.")
+    lit_search_parser.add_argument("--limit", type=int, default=5, help="Results per query/source.")
+    lit_search_parser.add_argument("--query-limit", type=int, default=3, help="Number of generated queries to run.")
+
     audit_parser = subparsers.add_parser("audit", help="Generate a statement audit template.")
     audit_parser.add_argument("problem_id")
 
@@ -232,6 +239,10 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "literature-packet":
             run_literature_packet(root, args.problem_id)
+            return 0
+
+        if args.command == "literature-search":
+            run_literature_search(root, args)
             return 0
 
         if args.command == "audit":
@@ -469,6 +480,21 @@ def run_literature_packet(root: Path, problem_id: str) -> str:
     write_text(path, content)
     print(f"Wrote {path}")
     return task_id
+
+
+def run_literature_search(root: Path, args: argparse.Namespace) -> None:
+    result = search_literature_for_problem(
+        root,
+        args.problem_id,
+        sources=args.source,
+        limit=args.limit,
+        query_limit=args.query_limit,
+    )
+    print(f"Found {result['result_count']} results")
+    for artifact in result["artifacts"]:
+        print(f"artifact: {artifact}")
+    if result["errors"]:
+        print(f"errors: {len(result['errors'])}")
 
 
 def run_audit(root: Path, problem_id: str) -> None:

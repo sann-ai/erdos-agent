@@ -4,16 +4,20 @@ import hashlib
 import html
 import json
 import re
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import date, datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
 PROBLEMS_YAML_URL = "https://raw.githubusercontent.com/teorth/erdosproblems/main/data/problems.yaml"
 ERDOS_PROBLEMS_BASE_URL = "https://www.erdosproblems.com"
+ARXIV_API_URL = "https://export.arxiv.org/api/query"
+CROSSREF_API_URL = "https://api.crossref.org/works"
 
 
 DEFAULT_DIRS = [
@@ -26,6 +30,8 @@ DEFAULT_DIRS = [
     "reports/analogies",
     "reports/literature",
     "reports/literature/findings",
+    "reports/literature/search",
+    "reports/literature/result_cards",
     "reports/pivots",
     "reports/statement_audits",
     "reports/attempts",
@@ -194,6 +200,10 @@ def fetch_text(url: str, *, timeout: int = 30) -> str:
     with urlopen(request, timeout=timeout) as response:
         charset = response.headers.get_content_charset() or "utf-8"
         return response.read().decode(charset)
+
+
+def fetch_json(url: str, *, timeout: int = 30) -> dict[str, Any]:
+    return json.loads(fetch_text(url, timeout=timeout))
 
 
 def create_problem(
@@ -737,10 +747,15 @@ def extract_keywords(statement: str, limit: int = 12) -> list[str]:
         "left",
         "right",
         "backslash",
+        "cite",
+        "oeis",
+        "possible",
     }
     counts: dict[str, int] = {}
     for word in words:
         key = word.lower()
+        if re.fullmatch(r"a\d+", key):
+            continue
         if key not in stop:
             counts[key] = counts.get(key, 0) + 1
     ranked = sorted(counts, key=lambda item: (-counts[item], item))
@@ -1317,12 +1332,15 @@ def run_literature_worker(root: Path, problem_id: str | int) -> dict[str, Any]:
     content = make_literature_report(problem)
     path = root / "reports" / "literature" / f"{normalized}.md"
     write_text(path, content)
+    search_result = search_literature_for_problem(root, normalized, sources=["arxiv", "crossref"], limit=3, query_limit=2)
     update_kb_index(root, f"wiki/problems/{normalized}.md", f"Problem {normalized} literature status")
     write_problem_wiki_stub(root, problem)
+    artifacts = [str(path.relative_to(root))]
+    artifacts.extend(search_result.get("artifacts", []))
     return {
         "status": "done",
-        "summary": f"Created literature report for {normalized}.",
-        "artifacts": [str(path.relative_to(root))],
+        "summary": f"Created literature report and external search artifacts for {normalized}.",
+        "artifacts": artifacts,
     }
 
 
@@ -1331,7 +1349,7 @@ def make_literature_report(problem: dict[str, Any]) -> str:
     statement = problem.get("statement_raw") or problem.get("statement_latex") or ""
     references = problem.get("known_references", [])
     remarks = problem.get("remarks_raw", "")
-    keywords = extract_keywords(" ".join([statement, remarks]), limit=16)
+    keywords = extract_keywords(statement, limit=16)
     reference_text = "\n".join(f"- {reference}" for reference in references) or "- No references captured locally."
     query_text = "\n".join(f"- {query}" for query in make_search_queries(problem, keywords))
     return f"""# Literature Report for {problem_id}
@@ -1383,8 +1401,10 @@ TODO
 
 def make_search_queries(problem: dict[str, Any], keywords: list[str]) -> list[str]:
     tags = [str(tag) for tag in problem.get("tags", [])]
+    hints = domain_query_hints(problem)
     base_terms = " ".join(keywords[:6])
     queries = []
+    queries.extend(hints)
     if base_terms:
         queries.append(base_terms)
     if tags and base_terms:
@@ -1393,7 +1413,339 @@ def make_search_queries(problem: dict[str, Any], keywords: list[str]) -> list[st
         key_match = re.match(r"^\[([^\]]+)\]\s*(.*)", str(reference))
         if key_match:
             queries.append(key_match.group(2)[:160])
-    return [query for query in queries if query.strip()]
+    return dedupe_strings([query for query in queries if query.strip()])
+
+
+def domain_query_hints(problem: dict[str, Any]) -> list[str]:
+    statement = (problem.get("statement_raw") or problem.get("statement_latex") or "").lower()
+    tags = " ".join(str(tag).lower() for tag in problem.get("tags", []))
+    hints: list[str] = []
+    if "2^" in statement and "prime" in statement:
+        hints.append("prime powers of two")
+    if "subset sum" in statement or "subset sums" in statement:
+        hints.append("distinct subset sums")
+    if "sidon" in statement or "sidon" in tags:
+        hints.append("Sidon set additive combinatorics")
+    if "additive basis" in tags:
+        hints.append("additive basis number theory")
+    if "practical" in statement:
+        hints.append("practical numbers divisors")
+    if "covering systems" in tags:
+        hints.append("covering systems residue classes")
+    return hints
+
+
+def dedupe_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        key = normalize_space(value).lower()
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(value)
+    return deduped
+
+
+def search_literature_for_problem(
+    root: Path,
+    problem_id: str | int,
+    *,
+    sources: list[str] | None = None,
+    limit: int = 5,
+    query_limit: int = 3,
+) -> dict[str, Any]:
+    problem = load_problem(root, problem_id)
+    normalized = problem.get("problem_id") or normalize_problem_id(problem["number"])
+    sources = sources or ["arxiv", "crossref"]
+    statement = problem.get("statement_raw") or problem.get("statement_latex") or ""
+    keywords = extract_keywords(statement, limit=16)
+    queries = make_search_queries(problem, keywords)[:query_limit]
+    results: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+
+    for query in queries:
+        for source in sources:
+            try:
+                if source == "arxiv":
+                    results.extend(search_arxiv(query, limit=limit))
+                elif source == "crossref":
+                    results.extend(search_crossref(query, limit=limit))
+                else:
+                    errors.append({"source": source, "query": query, "error": "unsupported source"})
+            except Exception as exc:
+                errors.append({"source": source, "query": query, "error": str(exc)})
+
+    deduped = filter_literature_results(problem, dedupe_literature_results(results))
+    payload = {
+        "problem_id": normalized,
+        "generated_at": date.today().isoformat(),
+        "sources": sources,
+        "queries": queries,
+        "result_count": len(deduped),
+        "results": deduped,
+        "errors": errors,
+    }
+    json_path = root / "reports" / "literature" / "search" / f"{normalized}.json"
+    md_path = root / "reports" / "literature" / "search" / f"{normalized}.md"
+    cards_path = root / "reports" / "literature" / "result_cards" / f"{normalized}.md"
+    write_json(json_path, payload)
+    write_text(md_path, render_literature_search_markdown(payload))
+    write_text(cards_path, render_anonymous_result_cards(payload))
+    return {
+        "status": "done",
+        "problem_id": normalized,
+        "result_count": len(deduped),
+        "errors": errors,
+        "artifacts": [
+            str(json_path.relative_to(root)),
+            str(md_path.relative_to(root)),
+            str(cards_path.relative_to(root)),
+        ],
+    }
+
+
+def search_arxiv(query: str, *, limit: int = 5) -> list[dict[str, Any]]:
+    params = urlencode({
+        "search_query": f"all:{query}",
+        "start": 0,
+        "max_results": limit,
+        "sortBy": "relevance",
+        "sortOrder": "descending",
+    })
+    xml_text = fetch_text(f"{ARXIV_API_URL}?{params}")
+    return parse_arxiv_results(xml_text)
+
+
+def parse_arxiv_results(xml_text: str) -> list[dict[str, Any]]:
+    namespace = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
+    root = ET.fromstring(xml_text)
+    results: list[dict[str, Any]] = []
+    for entry in root.findall("atom:entry", namespace):
+        title = normalize_space(entry.findtext("atom:title", default="", namespaces=namespace))
+        summary = normalize_space(entry.findtext("atom:summary", default="", namespaces=namespace))
+        url = normalize_space(entry.findtext("atom:id", default="", namespaces=namespace))
+        published = normalize_space(entry.findtext("atom:published", default="", namespaces=namespace))
+        authors = [
+            normalize_space(author.findtext("atom:name", default="", namespaces=namespace))
+            for author in entry.findall("atom:author", namespace)
+        ]
+        primary_category = ""
+        primary = entry.find("arxiv:primary_category", namespace)
+        if primary is not None:
+            primary_category = primary.attrib.get("term", "")
+        results.append(
+            {
+                "source": "arxiv",
+                "title": title,
+                "authors": [author for author in authors if author],
+                "year": published[:4] if published else "",
+                "url": url,
+                "identifier": url.rsplit("/", 1)[-1] if url else "",
+                "venue": "arXiv",
+                "categories": [primary_category] if primary_category else [],
+                "abstract_snippet": truncate_words(summary, 80),
+            }
+        )
+    return results
+
+
+def search_crossref(query: str, *, limit: int = 5) -> list[dict[str, Any]]:
+    params = urlencode({
+        "query.bibliographic": query,
+        "rows": limit,
+        "select": "DOI,title,author,published-print,published-online,issued,URL,container-title,abstract",
+    })
+    payload = fetch_json(f"{CROSSREF_API_URL}?{params}")
+    return parse_crossref_results(payload)
+
+
+def parse_crossref_results(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for item in payload.get("message", {}).get("items", []):
+        title = normalize_space(first_or_empty(item.get("title")))
+        authors = []
+        for author in item.get("author", [])[:8]:
+            name = normalize_space(" ".join(part for part in [author.get("given", ""), author.get("family", "")] if part))
+            if name:
+                authors.append(name)
+        year = extract_crossref_year(item)
+        abstract = normalize_space(strip_tags(item.get("abstract", "")))
+        doi = normalize_space(item.get("DOI", ""))
+        url = normalize_space(item.get("URL", ""))
+        results.append(
+            {
+                "source": "crossref",
+                "title": title,
+                "authors": authors,
+                "year": year,
+                "url": url,
+                "identifier": doi,
+                "venue": normalize_space(first_or_empty(item.get("container-title"))),
+                "categories": [],
+                "abstract_snippet": truncate_words(abstract, 80),
+            }
+        )
+    return results
+
+
+def extract_crossref_year(item: dict[str, Any]) -> str:
+    for key in ["published-print", "published-online", "issued"]:
+        date_parts = item.get(key, {}).get("date-parts", [])
+        if date_parts and date_parts[0]:
+            return str(date_parts[0][0])
+    return ""
+
+
+def dedupe_literature_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for result in results:
+        key = result.get("identifier") or result.get("url") or result.get("title", "").lower()
+        key = normalize_space(str(key)).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(result)
+    return deduped
+
+
+def filter_literature_results(problem: dict[str, Any], results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    target_terms = literature_relevance_terms(problem)
+    if not target_terms:
+        return results
+    filtered: list[dict[str, Any]] = []
+    for result in results:
+        result_text = " ".join([
+            result.get("title", ""),
+            result.get("abstract_snippet", ""),
+            result.get("venue", ""),
+        ])
+        if not result_matches_required_context(problem, result_text):
+            continue
+        result_terms = math_tokens(result_text)
+        shared = sorted(target_terms & result_terms)
+        if not shared:
+            continue
+        enriched = dict(result)
+        enriched["relevance_terms"] = shared[:12]
+        enriched["relevance_score"] = len(shared)
+        filtered.append(enriched)
+    filtered.sort(key=lambda item: (-item.get("relevance_score", 0), item.get("source", ""), item.get("title", "")))
+    return filtered
+
+
+def result_matches_required_context(problem: dict[str, Any], result_text: str) -> bool:
+    statement = (problem.get("statement_raw") or problem.get("statement_latex") or "").lower()
+    mentions_powers_of_two = "2^" in statement or "powers of two" in statement or "power of two" in statement
+    if mentions_powers_of_two and "prime" in statement:
+        return bool(re.search(r"\btwo\b|\bpowers?\s+of\s+2\b|2\^", result_text, flags=re.IGNORECASE))
+    return True
+
+
+def literature_relevance_terms(problem: dict[str, Any]) -> set[str]:
+    statement = problem.get("statement_raw") or problem.get("statement_latex") or ""
+    tags = " ".join(str(tag) for tag in problem.get("tags", []))
+    hints = " ".join(domain_query_hints(problem))
+    return math_tokens(" ".join([statement, tags, hints]))
+
+
+def render_literature_search_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        f"# Literature Search for {payload['problem_id']}",
+        "",
+        f"Generated: {payload['generated_at']}",
+        "",
+        "## Queries",
+        "",
+    ]
+    lines.extend(f"- {query}" for query in payload.get("queries", []))
+    lines.extend(["", "## Results", ""])
+    for index, result in enumerate(payload.get("results", []), start=1):
+        authors = ", ".join(result.get("authors", [])[:4])
+        if len(result.get("authors", [])) > 4:
+            authors += ", et al."
+        lines.extend([
+            f"### {index}. {result.get('title') or 'Untitled'}",
+            "",
+            f"- source: {result.get('source', '')}",
+            f"- year: {result.get('year', '')}",
+            f"- authors: {authors or 'unknown'}",
+            f"- venue: {result.get('venue', '')}",
+            f"- id: {result.get('identifier', '')}",
+            f"- url: {result.get('url', '')}",
+            f"- relevance terms: {', '.join(result.get('relevance_terms', []))}",
+        ])
+        if result.get("abstract_snippet"):
+            lines.extend(["", result["abstract_snippet"]])
+        lines.append("")
+    if payload.get("errors"):
+        lines.extend(["## Errors", ""])
+        lines.extend(f"- {error['source']} / {error['query']}: {error['error']}" for error in payload["errors"])
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_anonymous_result_cards(payload: dict[str, Any]) -> str:
+    lines = [
+        f"# Anonymous Result Cards for {payload['problem_id']}",
+        "",
+        "These cards are solver-facing. They omit source URLs and bibliographic metadata.",
+        "",
+    ]
+    for index, result in enumerate(payload.get("results", []), start=1):
+        solver_text = redact_solver_facing_text(" ".join([result.get("title", ""), result.get("abstract_snippet", "")]))
+        content_terms = ", ".join(extract_keywords(solver_text, limit=8))
+        lines.extend([
+            f"## R{index:03d}",
+            "",
+            f"Content terms: {content_terms or 'TODO'}",
+            "",
+            "Relation to target: TODO: implies / nearly implies / special case / obstruction / unrelated",
+            "",
+        ])
+        snippet = redact_solver_facing_text(result.get("abstract_snippet", ""))
+        if snippet:
+            lines.extend(["Summary snippet:", "", snippet, ""])
+        lines.extend(["Method tags: TODO", "", "Confidence: TODO", ""])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def redact_solver_facing_text(text: str) -> str:
+    replacements = [
+        (r"\bpaul erd[őo]s\b", "source-redacted"),
+        (r"\berd[őo]s(?:\s+problems?)?\b", "source-redacted"),
+        (r"\berdosproblems\b", "source-redacted"),
+        (r"\bopen problem\b", "question"),
+        (r"\bunsolved\b", "status-unspecified"),
+        (r"\bconjecture\s+\d+\b", "numbered conjecture"),
+        (r"\bproblem\s+#?\d+\b", "numbered question"),
+        (r"#\d+", "numbered question"),
+    ]
+    redacted = str(text)
+    for pattern, replacement in replacements:
+        redacted = re.sub(pattern, replacement, redacted, flags=re.IGNORECASE)
+    return normalize_space(redacted)
+
+
+def normalize_space(text: str) -> str:
+    return re.sub(r"\s+", " ", html.unescape(str(text))).strip()
+
+
+def first_or_empty(value: Any) -> str:
+    if isinstance(value, list):
+        return str(value[0]) if value else ""
+    return str(value or "")
+
+
+def strip_tags(text: str) -> str:
+    return re.sub(r"<[^>]+>", " ", str(text))
+
+
+def truncate_words(text: str, limit: int) -> str:
+    words = normalize_space(text).split()
+    if len(words) <= limit:
+        return " ".join(words)
+    return " ".join(words[:limit]) + " ..."
 
 
 def write_problem_wiki_stub(root: Path, problem: dict[str, Any]) -> None:
@@ -1740,6 +2092,8 @@ def math_tokens(text: str) -> set[str]:
         "are",
         "is",
         "ldots",
+        "one",
+        "two",
     }
     tokens = {
         token.lower()

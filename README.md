@@ -13,6 +13,7 @@ Codexでエルディッシュ問題を扱うための、最初の小さな研究
 - [Collaboration Guide](docs/collaboration.md): 役割分担、queue運用、PR方針、安全ルール
 - [Agent Protocol](docs/agent_protocol.md): multi-agent / Codex automation向けのinbox/outbox契約
 - [Codex Automation](docs/automation.md): `run-next-agent` を定期実行するための設定メモ
+- [Literature Agent](docs/literature_agent.md): arXiv/Crossref検索と匿名Result Cardの運用
 - [Knowledge Base](docs/knowledge_base.md): 数学exampleとMethod Cardを含む知識ベース設計
 
 ## 方針
@@ -116,6 +117,12 @@ reports/analogies/ep0728.json
 ## Literature findingからピボットする
 
 検索エージェントが有望な論文・手法・構成を見つけたら、findingとして保存します。
+
+外部メタデータ検索:
+
+```bash
+python3 -m erdos_agent literature-search 9 --source arxiv --source crossref --limit 5 --query-limit 3
+```
 
 ```bash
 python3 -m erdos_agent add-finding 9 \

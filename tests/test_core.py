@@ -2,6 +2,7 @@ import unittest
 from tempfile import TemporaryDirectory
 from pathlib import Path
 
+import erdos_agent.core as core
 from erdos_agent.core import (
     complete_agent_run,
     create_agent_run,
@@ -9,18 +10,26 @@ from erdos_agent.core import (
     ensure_workspace,
     execute_agent_run,
     execute_next_agent_run,
+    extract_keywords,
+    filter_literature_results,
     extract_problem_content_from_html,
     extract_problem_statement_from_html,
     github_record_to_problem,
     make_blind_packet,
     normalize_problem_id,
     parse_github_problems_yaml,
+    parse_arxiv_results,
+    parse_crossref_results,
     pivot_from_literature_finding,
     record_literature_finding,
     record_math_example,
+    redact_solver_facing_text,
+    render_anonymous_result_cards,
+    render_literature_search_markdown,
     score_problem,
     similarity_score,
     supervisor_step,
+    make_search_queries,
     write_json,
 )
 
@@ -133,6 +142,109 @@ class CoreTests(unittest.TestCase):
         self.assertIn("Remark one.", content["remarks"])
         self.assertEqual(len(content["references"]), 2)
         self.assertTrue(content["references"][0].startswith("[Ab24]"))
+
+    def test_parse_arxiv_results(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <entry>
+    <id>http://arxiv.org/abs/1234.5678v1</id>
+    <updated>2024-01-02T00:00:00Z</updated>
+    <published>2024-01-01T00:00:00Z</published>
+    <title>A short additive basis result</title>
+    <summary>We prove a small theorem about primes and powers of two.</summary>
+    <author><name>A. Author</name></author>
+    <arxiv:primary_category term="math.NT" />
+  </entry>
+</feed>
+"""
+        results = parse_arxiv_results(xml)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["source"], "arxiv")
+        self.assertEqual(results[0]["title"], "A short additive basis result")
+        self.assertEqual(results[0]["categories"], ["math.NT"])
+
+    def test_parse_crossref_results_and_render_cards(self):
+        payload = {
+            "message": {
+                "items": [
+                    {
+                        "DOI": "10.1000/example",
+                        "title": ["A title"],
+                        "author": [{"given": "A.", "family": "Author"}],
+                        "issued": {"date-parts": [[2024]]},
+                        "URL": "https://doi.org/10.1000/example",
+                        "container-title": ["Journal"],
+                        "abstract": "<jats:p>This proves a theorem about additive bases.</jats:p>",
+                    }
+                ]
+            }
+        }
+        results = parse_crossref_results(payload)
+        self.assertEqual(results[0]["source"], "crossref")
+        self.assertEqual(results[0]["year"], "2024")
+        search_payload = {
+            "problem_id": "ep0001",
+            "generated_at": "2026-05-03",
+            "queries": ["additive bases"],
+            "results": results,
+            "errors": [],
+        }
+        markdown = render_literature_search_markdown(search_payload)
+        cards = render_anonymous_result_cards(search_payload)
+        self.assertIn("A title", markdown)
+        self.assertNotIn("https://doi.org", cards)
+        self.assertIn("Content terms", cards)
+
+    def test_anonymous_result_cards_redact_source_and_status_leaks(self):
+        search_payload = {
+            "problem_id": "ep0001",
+            "generated_at": "2026-05-03",
+            "queries": ["additive bases"],
+            "results": [
+                {
+                    "source": "arxiv",
+                    "title": "A note on Erdos problem #9",
+                    "abstract_snippet": "We discuss an open problem of Paul Erdos and a related unsolved case.",
+                }
+            ],
+            "errors": [],
+        }
+        cards = render_anonymous_result_cards(search_payload)
+        lowered = cards.lower()
+        self.assertNotIn("erdos", lowered)
+        self.assertNotIn("open problem", lowered)
+        self.assertNotIn("unsolved", lowered)
+        self.assertIn("source-redacted", lowered)
+
+    def test_redact_solver_facing_text_handles_unicode_erdos(self):
+        redacted = redact_solver_facing_text("Erdős Problems conjecture 123 is an open problem.")
+        lowered = redacted.lower()
+        self.assertNotIn("erdős", lowered)
+        self.assertNotIn("open problem", lowered)
+
+    def test_make_search_queries_adds_domain_hints(self):
+        problem = {
+            "statement_raw": "Let A be odd integers not of the form p+2^k+2^l where p is prime.",
+            "tags": ["number theory", "additive basis"],
+            "known_references": [],
+        }
+        queries = make_search_queries(problem, extract_keywords(problem["statement_raw"]))
+        self.assertEqual(queries[0], "prime powers of two")
+        self.assertIn("additive basis number theory", queries)
+
+    def test_filter_literature_results_removes_unrelated_hits(self):
+        problem = {
+            "statement_raw": "Is every large integer the sum of a prime and powers of two?",
+            "tags": ["additive basis", "primes"],
+        }
+        results = [
+            {"title": "Power indices in legislatures", "abstract_snippet": "Voting power in two chambers.", "venue": ""},
+            {"title": "Prime powers and zeta functions", "abstract_snippet": "We compute sums over prime powers p^s.", "venue": ""},
+            {"title": "Two prime squares and powers of 2", "abstract_snippet": "A Waring-Goldbach result.", "venue": ""},
+        ]
+        filtered = filter_literature_results(problem, results)
+        self.assertEqual(len(filtered), 1)
+        self.assertIn("prime", filtered[0]["relevance_terms"])
 
     def test_similarity_score_uses_tags_terms_and_references(self):
         seed = {
@@ -291,7 +403,16 @@ class CoreTests(unittest.TestCase):
                 },
             )
             run = create_agent_run(root, agent="literature", problem_id=9)
-            completed = execute_agent_run(root, run["run_id"])
+            original_search = core.search_literature_for_problem
+            try:
+                core.search_literature_for_problem = lambda *args, **kwargs: {
+                    "artifacts": [],
+                    "errors": [],
+                    "result_count": 0,
+                }
+                completed = execute_agent_run(root, run["run_id"])
+            finally:
+                core.search_literature_for_problem = original_search
             self.assertEqual(completed["status"], "done")
             self.assertTrue((root / "reports/literature/ep0009.md").exists())
             self.assertTrue((root / "agent_runs/outbox" / f"{run['run_id']}.json").exists())
