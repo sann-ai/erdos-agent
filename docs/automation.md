@@ -38,10 +38,30 @@ Do not post externally. Do not commit generated research artifacts unless explic
 Start conservative:
 
 ```text
-every 30 minutes
+every hour
 ```
 
-This is enough for queue draining while the workers are deterministic MVP workers. Once model-driven or external-search workers are added, keep a human review gate and consider running less frequently.
+This is enough for queue draining while the workers are deterministic MVP workers. Once model-driven or external-search workers are added, keep a human review gate and consider whether the cadence should stay hourly.
+
+## Active Codex Automation
+
+Created on 2026-05-03:
+
+```text
+id: drain-erdos-agent-queue
+name: Drain Erdos Agent Queue
+schedule: hourly
+workspace: /Users/san/Documents/New project
+command intent: python3 -m erdos_agent run-next-agent
+```
+
+The automation is intentionally conservative:
+
+- it processes at most one queued job per run
+- it exits cleanly when the queue is empty
+- it summarizes `agent_runs/last_run_next.json`
+- it does not post externally
+- it does not commit generated research artifacts
 
 ## Queue Creation
 
@@ -58,4 +78,3 @@ python3 -m erdos_agent create-run --from-triage --agent computation --action com
 - Blind Solver jobs should use only redacted packet artifacts.
 - Generated artifacts remain ignored by Git by default.
 - Important claims require Claim Card, Critic, literature review, and human approval.
-
