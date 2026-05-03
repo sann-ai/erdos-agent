@@ -10,6 +10,7 @@ Codexでエルディッシュ問題を扱うための、最初の小さな研究
 
 - [Work History](docs/work_history.md): ここまでに実装したこと、ローカル試行、現在の状態
 - [Handoff](docs/handoff.md): コンテキスト圧縮後に再開するための短い引き継ぎ
+- [Quickstart](docs/quickstart.md): 小さいend-to-end workflowをローカルで再現する手順
 - [Roadmap](docs/roadmap.md): ここから先の実装計画
 - [Collaboration Guide](docs/collaboration.md): 役割分担、queue運用、PR方針、安全ルール
 - [Agent Protocol](docs/agent_protocol.md): multi-agent / Codex automation向けのinbox/outbox契約

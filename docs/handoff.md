@@ -59,4 +59,10 @@ python3 -m erdos_agent approve-promotion-candidate CANDIDATE_ID --queue-pivots -
 
 ## Next Good Step
 
-Create a contributor quickstart that runs a small end-to-end local workflow from ingest through review-gated literature promotion.
+Run the contributor quickstart and refine any rough edges:
+
+```bash
+docs/quickstart.md
+```
+
+After that, the next useful implementation step is a `quickstart-check` command or Makefile target that wraps the safest non-approval checks.

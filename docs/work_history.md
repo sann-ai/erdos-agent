@@ -179,6 +179,19 @@ Observed locally:
 - A later review gate trial produced 5 source-aware promotion candidates without auto-approving them.
 - `supervisor-step` now reports those pending review candidates even when the queue is empty.
 
+### Contributor Quickstart
+
+Added:
+
+- `docs/quickstart.md`
+- README link to the quickstart
+- handoff note pointing future agents to the quickstart
+
+Purpose:
+
+- Give new contributors a small local workflow from ingest through review-gated literature promotion.
+- Keep approval and external publication as explicit human actions.
+
 ## Local State From Trial Runs
 
 The repository ignores generated research artifacts by default:

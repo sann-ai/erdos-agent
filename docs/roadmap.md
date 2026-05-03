@@ -28,7 +28,7 @@ Goal: make it easy for a contributor to reproduce the baseline state.
 Tasks:
 
 - Add a `make` or script wrapper for common commands.
-- Add a sample end-to-end workflow in `docs/quickstart.md`.
+- Added a sample end-to-end workflow in `docs/quickstart.md`.
 - Add schema examples for problem JSON, run JSON, finding JSON, example JSON, and claim cards.
 - Add `--dry-run` to commands that write many artifacts.
 - Add better reporting for skipped/failed statement fetches.
@@ -187,13 +187,4 @@ The current `transfer-search` is simple. Later versions should cluster problems 
 
 ## Recommended Immediate Next Step
 
-Create a small contributor-facing quickstart:
-
-```bash
-python3 -m erdos_agent ingest-github --status open --limit 10 --fetch-statements
-python3 -m erdos_agent triage-all --status open --limit 10
-python3 -m erdos_agent create-run --from-triage --agent literature --action literature_review --limit 2
-python3 -m erdos_agent supervisor-step
-```
-
-Then have one contributor run a Literature Agent job manually and record the result as a finding.
+Add a `quickstart-check` command or Makefile target that runs the safe verification parts of `docs/quickstart.md` without approving candidates or creating public-facing claims.
