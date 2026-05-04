@@ -589,6 +589,51 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(visible["returned"], 1)
             self.assertEqual(visible["items"][0]["status"], "rejected")
 
+    def test_candidate_decision_hides_duplicate_paper_variants(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "reports/literature/search/ep0001.json",
+                {
+                    "problem_id": "ep0001",
+                    "queries": ["sidon systems"],
+                    "results": [
+                        {
+                            "source": "crossref",
+                            "title": "The structure of Sidon set systems",
+                            "identifier": "10.5817/cz.muni.eurocomb23-114",
+                            "abstract_snippet": "A useful abstract.",
+                            "relevance_terms": ["sidon", "systems"],
+                            "relevance_score": 4,
+                        },
+                        {
+                            "source": "arxiv",
+                            "title": "The structure of Sidon set systems",
+                            "identifier": "2211.14011v2",
+                            "abstract_snippet": "A useful abstract.",
+                            "relevance_terms": ["sidon", "systems"],
+                            "relevance_score": 3,
+                        },
+                    ],
+                },
+            )
+            build_promotion_candidate_report(root, min_score=1)
+            record_promotion_candidate_decision(
+                root,
+                "ep0001-r001",
+                decision="needs_more_reading",
+                reviewer="human-a",
+                notes=["withdrawn related preprint"],
+            )
+
+            hidden = build_promotion_candidate_report(root, min_score=1)
+            visible = build_promotion_candidate_report(root, min_score=1, include_decided=True)
+
+            self.assertEqual(hidden["returned"], 0)
+            self.assertEqual(visible["returned"], 1)
+            self.assertEqual(visible["items"][0]["status"], "needs_more_reading")
+
     def test_supervisor_step_includes_review_candidate_summary(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

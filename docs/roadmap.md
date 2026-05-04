@@ -187,4 +187,4 @@ The current `transfer-search` is simple. Later versions should cluster problems 
 
 ## Recommended Immediate Next Step
 
-Use `review-promotion-candidate` and `preview-promotion-candidate` on one high-confidence literature candidate, then either mark it rejected/deferred or approve it with reviewer notes and verify the full loop to queued follow-up runs.
+Review `ep0043-r001` or search for a safer Sidon-background candidate; `ep0043-r002` is marked `needs_more_reading` because its corresponding arXiv record was withdrawn.

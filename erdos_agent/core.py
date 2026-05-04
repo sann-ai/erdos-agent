@@ -1196,6 +1196,7 @@ def build_promotion_candidate_report(
     include_decided: bool = False,
 ) -> dict[str, Any]:
     raw_candidates: list[dict[str, Any]] = []
+    decision_index = promotion_candidate_decision_index(root)
     for search_path in sorted((root / "reports" / "literature" / "search").glob("ep*.json")):
         search_payload = read_json(search_path)
         problem_id = normalize_problem_id(search_payload.get("problem_id", search_path.stem))
@@ -1214,7 +1215,7 @@ def build_promotion_candidate_report(
             already_promoted = promotion_path.exists()
             if already_promoted and not include_promoted:
                 continue
-            decision = read_promotion_candidate_decision(root, candidate_id)
+            decision = find_promotion_candidate_decision(candidate, decision_index)
             if decision is not None and not include_decided:
                 continue
             candidate["status"] = "already_promoted" if already_promoted else "candidate"
@@ -1447,6 +1448,45 @@ def read_promotion_candidate_decision(root: Path, candidate_id: str) -> dict[str
     if not path.exists():
         return None
     return read_json(path)
+
+
+def promotion_candidate_decision_index(root: Path) -> dict[str, Any]:
+    decisions = []
+    keys: dict[str, dict[str, Any]] = {}
+    by_candidate_id: dict[str, dict[str, Any]] = {}
+    for path in sorted((root / "reports" / "literature" / "review" / "decisions").glob("*.json")):
+        decision = read_json(path)
+        decisions.append(decision)
+        candidate_id = str(decision.get("candidate_id", ""))
+        if candidate_id:
+            by_candidate_id[candidate_id] = decision
+        for key in decision_match_keys(decision.get("candidate_snapshot", {})):
+            keys[key] = decision
+    return {
+        "decisions": decisions,
+        "by_candidate_id": by_candidate_id,
+        "keys": keys,
+    }
+
+
+def find_promotion_candidate_decision(candidate: dict[str, Any], decision_index: dict[str, Any]) -> dict[str, Any] | None:
+    direct = decision_index.get("by_candidate_id", {}).get(candidate.get("candidate_id", ""))
+    if direct is not None:
+        return direct
+    key_index = decision_index.get("keys", {})
+    for key in decision_match_keys(candidate):
+        if key in key_index:
+            return key_index[key]
+    return None
+
+
+def decision_match_keys(candidate: dict[str, Any]) -> list[str]:
+    keys = []
+    keys.extend(str(key) for key in candidate.get("_dedupe_keys", []) if key)
+    if candidate.get("dedupe_key"):
+        keys.append(str(candidate["dedupe_key"]))
+    keys.extend(literature_result_dedupe_keys(candidate))
+    return dedupe_strings([key for key in keys if key])
 
 
 def record_promotion_candidate_decision(

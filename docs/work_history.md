@@ -213,6 +213,20 @@ Added:
 
 This makes approval auditable for multi-person work without weakening the no-auto-posting/no-novelty-claim rule.
 
+### Experiment 001 Candidate Review
+
+Added:
+
+- `docs/experiments/001_ep0043_r002_review.md`
+- duplicate-aware decision matching so a decision on one paper variant also suppresses equivalent arXiv/Crossref/title variants
+
+Outcome:
+
+- `ep0043-r002` was not approved.
+- Public source review found that the corresponding arXiv record `2211.14011` was withdrawn because of a flaw in the main argument.
+- The local decision for `ep0043-r002` is `needs_more_reading`.
+- The default review list now suppresses the same-paper arXiv duplicate and leaves `ep0043-r001` as the next visible candidate.
+
 Purpose:
 
 - Give new contributors a small local workflow from ingest through review-gated literature promotion.
