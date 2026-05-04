@@ -187,4 +187,4 @@ The current `transfer-search` is simple. Later versions should cluster problems 
 
 ## Recommended Immediate Next Step
 
-Review `ep0043-r001` or search for a safer Sidon-background candidate; `ep0043-r002` is marked `needs_more_reading` because its corresponding arXiv record was withdrawn.
+Review `ep0043-r001`; if it is off-topic multiplicative Sidon material, mark it rejected and then improve risk-aware literature filtering or make computation workers generate runnable scripts.

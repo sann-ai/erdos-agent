@@ -227,6 +227,20 @@ Outcome:
 - The local decision for `ep0043-r002` is `needs_more_reading`.
 - The default review list now suppresses the same-paper arXiv duplicate and leaves `ep0043-r001` as the next visible candidate.
 
+### Experiment 001 Manual Finding Run
+
+Added:
+
+- `docs/experiments/001_csw20_manual_finding_run.md`
+
+Outcome:
+
+- Recorded the 2020 `Sidon set systems` paper as manual finding `ep0043-csw20-sidon-set-systems`.
+- Generated 13 pivot candidates.
+- Queued and completed 5 follow-up jobs: computation for `ep0030`, `ep0039`, `ep0041`, and literature for `ep0042`, `ep0044`.
+- Queue ended empty.
+- The next visible promotion candidate is `ep0043-r001`.
+
 Purpose:
 
 - Give new contributors a small local workflow from ingest through review-gated literature promotion.
