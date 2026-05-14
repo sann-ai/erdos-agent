@@ -302,6 +302,7 @@ Added:
 - exact enumeration of Sidon subset positive-difference masks
 - unrestricted and equal-size Sidon-pair objective reporting
 - `proof-route-packet 43 --route difference-packing`
+- `queue-proof-route 43 --route difference-packing`
 
 Outcome:
 
@@ -311,6 +312,7 @@ Outcome:
 - The maximum observed equal-size excess was `2`.
 - No small counterexample signal was found; the data currently supports treating EP43 as a plausible proof-search target rather than a likely disproof target.
 - Generated a source-aware Supervisor proof-route note plus a redacted Blind Solver packet for the difference-mask formulation.
+- Queued and drained the difference-packing proof route as a `blind_solver` job, producing a handoff artifact under `reports/attempts/`.
 
 Purpose:
 

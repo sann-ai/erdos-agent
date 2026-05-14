@@ -113,10 +113,18 @@ That packet can be regenerated with:
 python3 -m erdos_agent proof-route-packet 43 --route difference-packing
 ```
 
+It can be queued for Blind Solver handoff with:
+
+```bash
+python3 -m erdos_agent queue-proof-route 43 --route difference-packing
+python3 -m erdos_agent run-next-agent --agent blind_solver
+```
+
 The local generated artifacts are:
 
 ```text
 reports/proof_routes/ep0043-difference-packing.md
 packets/blind/math-task-b2ab29b556e1-difference-packing.md
 data/manifests/math-task-b2ab29b556e1-difference-packing.json
+reports/attempts/ep0043-difference_packing-blind-handoff.md
 ```

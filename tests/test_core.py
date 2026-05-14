@@ -32,6 +32,7 @@ from erdos_agent.core import (
     preview_promotion_candidate,
     promote_literature_search_result,
     quickstart_check,
+    queue_proof_route_run,
     read_json,
     record_literature_finding,
     record_math_example,
@@ -1121,6 +1122,33 @@ class CoreTests(unittest.TestCase):
             completed = execute_agent_run(root, run["run_id"])
             self.assertEqual(completed["status"], "needs_human")
             self.assertTrue(completed["result_artifacts"][0].startswith("packets/blind/"))
+
+    def test_queue_proof_route_run_hands_off_redacted_packet(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "data/problems/ep0043.json",
+                {
+                    "number": 43,
+                    "problem_id": "ep0043",
+                    "status_site": "open",
+                    "statement_raw": (
+                        "If A,B subset {1,...,N} are two Sidon sets such that "
+                        "(A-A) cap (B-B) = {0}, compare binom(|A|,2)+binom(|B|,2)."
+                    ),
+                },
+            )
+
+            queued = queue_proof_route_run(root, 43)
+            run = queued["run"]
+            completed = execute_agent_run(root, run["run_id"])
+
+            self.assertEqual(run["agent"], "blind_solver")
+            self.assertEqual(completed["status"], "needs_human")
+            self.assertIn("Redacted proof-route packet", completed["summary"])
+            self.assertTrue(any(path.startswith("packets/blind/") for path in completed["result_artifacts"]))
+            self.assertTrue(any(path.endswith("-blind-handoff.md") for path in completed["result_artifacts"]))
 
     def test_execute_next_agent_run_handles_idle_and_agent_filter(self):
         with TemporaryDirectory() as tmp:

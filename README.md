@@ -242,6 +242,13 @@ python3 computations/ep0043/search.py --max-n 20
 python3 -m erdos_agent proof-route-packet 43 --route difference-packing
 ```
 
+同じpacketをBlind Solver用queueに載せる場合:
+
+```bash
+python3 -m erdos_agent queue-proof-route 43 --route difference-packing
+python3 -m erdos_agent run-next-agent --agent blind_solver
+```
+
 agentは今のところ以下を想定しています。
 
 ```text

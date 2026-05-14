@@ -52,6 +52,8 @@ python3 -m erdos_agent create-run --problem 43 --agent computation --priority 1
 python3 -m erdos_agent run-next-agent --agent computation
 python3 computations/ep0043/search.py --max-n 20
 python3 -m erdos_agent proof-route-packet 43 --route difference-packing
+python3 -m erdos_agent queue-proof-route 43 --route difference-packing
+python3 -m erdos_agent run-next-agent --agent blind_solver
 ```
 
 ## Small-Case Summary
@@ -98,3 +100,9 @@ The packet asks for:
    up to `O(1)` slack, into the positive-difference set of a maximum Sidon set.
 3. Compare this with the `popular differences`/generalized Sidon literature candidate
    before any source-aware idea is passed to a blind solver.
+
+The queue handoff generated:
+
+```text
+reports/attempts/ep0043-difference_packing-blind-handoff.md
+```

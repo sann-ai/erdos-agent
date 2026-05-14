@@ -33,6 +33,7 @@ Create queued jobs with:
 ```bash
 python3 -m erdos_agent create-run --problem 25 --agent literature
 python3 -m erdos_agent create-run --from-triage --agent literature --action literature_review --limit 5
+python3 -m erdos_agent queue-proof-route 43 --route difference-packing
 ```
 
 Inspect and complete jobs with:
@@ -46,6 +47,11 @@ python3 -m erdos_agent complete-run RUN_ID --status done --summary "short result
 ```
 
 `run-agent` currently uses deterministic MVP workers. It creates structured artifacts for literature, computation, statement audit, formalization, critic, or blind packet handoff; later Codex automations can replace these workers with live model-driven agents while preserving the same inbox/outbox contract.
+
+For proof-route jobs, `queue-proof-route` creates a source-aware Supervisor note and a
+redacted packet under `packets/blind/`, then queues a `blind_solver` job. The deterministic
+worker only creates a handoff in `reports/attempts/`; a live solver agent should receive
+only the redacted packet and write its attempt back to `reports/attempts/`.
 
 `supervisor-step` writes `agent_runs/supervisor_step.json`. In addition to queued and completed run counts, it includes `review_candidates` from `reports/literature/review/promotion_candidates.json` when a review list exists.
 

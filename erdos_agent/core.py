@@ -2357,6 +2357,32 @@ def create_agent_run(
     return payload
 
 
+def queue_proof_route_run(root: Path, problem_id: str | int, *, route: str = "difference-packing") -> dict[str, Any]:
+    if route != "difference-packing":
+        raise ValueError(f"Unsupported proof route: {route}")
+    route_result = make_difference_packing_proof_route(root, problem_id)
+    packet_artifacts = [artifact for artifact in route_result["artifacts"] if artifact.startswith("packets/blind/")]
+    run = create_agent_run(
+        root,
+        agent="blind_solver",
+        problem_id=route_result["problem_id"],
+        prompt="Use only the attached redacted proof-route packet. Return a proof, counterexample, or gap-labeled lemma attempt.",
+        artifacts=route_result["artifacts"],
+        priority=1,
+        metadata={
+            "source": "proof_route",
+            "route": route,
+            "task_id": route_result["task_id"],
+            "blind_packet_artifacts": packet_artifacts,
+        },
+    )
+    return {
+        "route": route_result,
+        "run": run,
+        "artifacts": route_result["artifacts"],
+    }
+
+
 def find_existing_queued_run(root: Path, *, agent: str, problem_id: str | None) -> dict[str, Any] | None:
     for path in sorted((root / "agent_runs" / "inbox").glob("*.json")):
         payload = read_json(path)
@@ -2525,7 +2551,7 @@ def execute_agent_run(root: Path, run_id: str) -> dict[str, Any]:
     elif agent == "critic":
         result = run_critic_worker(root, problem_id)
     elif agent == "blind_solver":
-        result = run_blind_solver_packet_worker(root, problem_id)
+        result = run_blind_solver_packet_worker(root, problem_id, run=run)
     else:
         result = {
             "status": "blocked",
@@ -3762,7 +3788,11 @@ do_not_post / needs_human / ask_expert / continue
 """
 
 
-def run_blind_solver_packet_worker(root: Path, problem_id: str | int) -> dict[str, Any]:
+def run_blind_solver_packet_worker(root: Path, problem_id: str | int, *, run: dict[str, Any] | None = None) -> dict[str, Any]:
+    route_packet_artifacts = blind_packet_artifacts_from_run(run or {})
+    if route_packet_artifacts:
+        return run_blind_solver_route_handoff(root, problem_id, run or {}, route_packet_artifacts)
+
     problem = load_problem(root, problem_id)
     task_id, content, manifest = make_blind_packet(problem)
     packet_path = root / "packets" / "blind" / f"{task_id}.md"
@@ -3773,6 +3803,69 @@ def run_blind_solver_packet_worker(root: Path, problem_id: str | int) -> dict[st
         "status": "needs_human",
         "summary": "Blind solver packet is ready; hand it to a blind solver agent without metadata.",
         "artifacts": [str(packet_path.relative_to(root)), str(manifest_path.relative_to(root))],
+    }
+
+
+def blind_packet_artifacts_from_run(run: dict[str, Any]) -> list[str]:
+    artifacts = [str(artifact) for artifact in run.get("artifacts", [])]
+    metadata_artifacts = [str(artifact) for artifact in run.get("metadata", {}).get("blind_packet_artifacts", [])]
+    return dedupe_strings(
+        [
+            artifact
+            for artifact in [*metadata_artifacts, *artifacts]
+            if artifact.startswith("packets/blind/") and artifact.endswith(".md")
+        ]
+    )
+
+
+def run_blind_solver_route_handoff(
+    root: Path,
+    problem_id: str | int,
+    run: dict[str, Any],
+    packet_artifacts: list[str],
+) -> dict[str, Any]:
+    normalized = normalize_problem_id(problem_id)
+    route = str(run.get("metadata", {}).get("route", "proof-route")).replace("-", "_")
+    handoff_path = root / "reports" / "attempts" / f"{normalized}-{route}-blind-handoff.md"
+    content = f"""# Blind Solver Handoff: {normalized} / {route}
+
+Generated: {date.today().isoformat()}
+
+This is an internal handoff. Give the solver only the redacted packet listed below,
+not this source-aware handoff file.
+
+## Redacted Packet
+
+{chr(10).join(f"- `{artifact}`" for artifact in packet_artifacts)}
+
+## Requested Solver Output
+
+Ask the solver to write a proof, disproof, or gap-labeled partial attempt in:
+
+```text
+reports/attempts/{normalized}-{route}-attempt.md
+```
+
+The attempt should include:
+
+1. Exact statement considered
+2. Edge cases and small examples
+3. Main proof or disproof attempt
+4. Lemmas used or proposed
+5. Gaps or uncertain steps
+6. Suggested formalization target
+
+## Safety
+
+- Do not give the solver source-aware literature files.
+- Do not claim novelty.
+- Do not post externally.
+"""
+    write_text(handoff_path, content)
+    return {
+        "status": "needs_human",
+        "summary": "Redacted proof-route packet is queued for a blind solver attempt.",
+        "artifacts": [*packet_artifacts, str(handoff_path.relative_to(root))],
     }
 
 

@@ -31,6 +31,7 @@ from .core import (
     preview_promotion_candidate,
     promote_literature_search_result,
     quickstart_check,
+    queue_proof_route_run,
     record_promotion_candidate_decision,
     record_literature_finding,
     record_math_example,
@@ -159,6 +160,10 @@ def build_parser() -> argparse.ArgumentParser:
     proof_route_parser = subparsers.add_parser("proof-route-packet", help="Generate a source-aware proof route note and redacted blind packet.")
     proof_route_parser.add_argument("problem_id")
     proof_route_parser.add_argument("--route", default="difference-packing", choices=["difference-packing"])
+
+    queue_proof_route_parser = subparsers.add_parser("queue-proof-route", help="Generate a proof route packet and queue it for Blind Solver handoff.")
+    queue_proof_route_parser.add_argument("problem_id")
+    queue_proof_route_parser.add_argument("--route", default="difference-packing", choices=["difference-packing"])
 
     lit_parser = subparsers.add_parser("literature-packet", help="Generate an anonymous literature search packet.")
     lit_parser.add_argument("problem_id")
@@ -316,6 +321,10 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "proof-route-packet":
             run_proof_route_packet(root, args)
+            return 0
+
+        if args.command == "queue-proof-route":
+            run_queue_proof_route(root, args)
             return 0
 
         if args.command == "literature-packet":
@@ -621,6 +630,15 @@ def run_proof_route_packet(root: Path, args: argparse.Namespace) -> None:
         raise ValueError(f"Unsupported proof route: {args.route}")
     result = make_difference_packing_proof_route(root, args.problem_id)
     print(f"Built proof route packet: {result['task_id']}")
+    for artifact in result["artifacts"]:
+        print(f"artifact: {artifact}")
+
+
+def run_queue_proof_route(root: Path, args: argparse.Namespace) -> None:
+    result = queue_proof_route_run(root, args.problem_id, route=args.route)
+    run = result["run"]
+    print(f"Queued proof route: {result['route']['task_id']}")
+    print(f"run: {run['run_id']} {run['agent']} {run.get('problem_id')}")
     for artifact in result["artifacts"]:
         print(f"artifact: {artifact}")
 

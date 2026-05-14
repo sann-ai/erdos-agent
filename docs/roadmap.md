@@ -195,8 +195,15 @@ Current evidence:
 - maximum observed excess over `binom(f(N), 2)` is `3`
 - maximum observed equal-size excess is `2`
 
-Next, hand the generated `difference-packing` blind packet to a solver agent and ask for
-a proof attempt, counterexample family, or lemma that would imply the main bound.
+Next, run an actual solver attempt against the generated `difference-packing` blind
+packet and store the result at:
+
+```text
+reports/attempts/ep0043-difference_packing-attempt.md
+```
+
+Then run a critic/referee pass against that attempt before using any source-aware
+literature context.
 
 Also source-check the two current EP43 targeted-search candidates:
 
