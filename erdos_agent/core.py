@@ -1515,26 +1515,18 @@ def read_promotion_candidate_decision(root: Path, candidate_id: str) -> dict[str
 def promotion_candidate_decision_index(root: Path) -> dict[str, Any]:
     decisions = []
     keys: dict[str, dict[str, Any]] = {}
-    by_candidate_id: dict[str, dict[str, Any]] = {}
     for path in sorted((root / "reports" / "literature" / "review" / "decisions").glob("*.json")):
         decision = read_json(path)
         decisions.append(decision)
-        candidate_id = str(decision.get("candidate_id", ""))
-        if candidate_id:
-            by_candidate_id[candidate_id] = decision
         for key in decision_match_keys(decision.get("candidate_snapshot", {})):
             keys[key] = decision
     return {
         "decisions": decisions,
-        "by_candidate_id": by_candidate_id,
         "keys": keys,
     }
 
 
 def find_promotion_candidate_decision(candidate: dict[str, Any], decision_index: dict[str, Any]) -> dict[str, Any] | None:
-    direct = decision_index.get("by_candidate_id", {}).get(candidate.get("candidate_id", ""))
-    if direct is not None:
-        return direct
     key_index = decision_index.get("keys", {})
     for key in decision_match_keys(candidate):
         if key in key_index:
@@ -2558,13 +2550,20 @@ def search_literature_for_problem(
     sources: list[str] | None = None,
     limit: int = 5,
     query_limit: int = 3,
+    manual_queries: list[str] | None = None,
+    include_generated_queries: bool = False,
 ) -> dict[str, Any]:
     problem = load_problem(root, problem_id)
     normalized = problem.get("problem_id") or normalize_problem_id(problem["number"])
-    sources = sources or ["arxiv", "crossref"]
+    sources = sources if sources is not None else ["arxiv", "crossref"]
     statement = problem.get("statement_raw") or problem.get("statement_latex") or ""
     keywords = extract_keywords(statement, limit=16)
-    queries = make_search_queries(problem, keywords)[:query_limit]
+    generated_queries = make_search_queries(problem, keywords)[:query_limit]
+    manual_queries = dedupe_strings([query for query in manual_queries or [] if query.strip()])
+    if manual_queries and not include_generated_queries:
+        queries = manual_queries
+    else:
+        queries = dedupe_strings([*manual_queries, *generated_queries])
     results: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
 
@@ -2586,6 +2585,9 @@ def search_literature_for_problem(
         "generated_at": date.today().isoformat(),
         "sources": sources,
         "queries": queries,
+        "manual_queries": manual_queries,
+        "generated_queries": generated_queries,
+        "include_generated_queries": include_generated_queries,
         "result_count": len(deduped),
         "results": deduped,
         "errors": errors,
@@ -2826,8 +2828,19 @@ def filter_literature_results(problem: dict[str, Any], results: list[dict[str, A
         enriched = dict(result)
         enriched["relevance_terms"] = shared[:12]
         enriched["relevance_score"] = len(shared)
+        risk_flags = promotion_candidate_risk_flags(problem, enriched)
+        enriched["risk_flags"] = risk_flags
+        enriched["risk_penalty"] = promotion_candidate_risk_penalty(risk_flags)
+        enriched["adjusted_relevance_score"] = max(0, enriched["relevance_score"] - enriched["risk_penalty"])
         filtered.append(enriched)
-    filtered.sort(key=lambda item: (-item.get("relevance_score", 0), item.get("source", ""), item.get("title", "")))
+    filtered.sort(
+        key=lambda item: (
+            -item.get("adjusted_relevance_score", item.get("relevance_score", 0)),
+            -item.get("relevance_score", 0),
+            item.get("source", ""),
+            item.get("title", ""),
+        )
+    )
     return filtered
 
 
@@ -2871,6 +2884,9 @@ def render_literature_search_markdown(payload: dict[str, Any]) -> str:
             f"- id: {result.get('identifier', '')}",
             f"- url: {result.get('url', '')}",
             f"- relevance terms: {', '.join(result.get('relevance_terms', []))}",
+            f"- relevance score: {result.get('relevance_score', '')}",
+            f"- adjusted relevance score: {result.get('adjusted_relevance_score', result.get('relevance_score', ''))}",
+            f"- risk flags: {', '.join(result.get('risk_flags', [])) or 'none'}",
         ])
         if result.get("abstract_snippet"):
             lines.extend(["", result["abstract_snippet"]])

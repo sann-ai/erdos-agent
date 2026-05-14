@@ -46,6 +46,19 @@ If the queue is empty but `review_candidates.available` is true, inspect:
 reports/literature/review/promotion_candidates.md
 ```
 
+Targeted literature search can use human-supplied queries:
+
+```bash
+python3 -m erdos_agent literature-search 43 \
+  --source arxiv \
+  --source crossref \
+  --limit 5 \
+  --query "Sidon sets disjoint difference sets" \
+  --query "two Sidon sets disjoint differences"
+```
+
+Manual queries replace generated queries unless `--include-generated-queries` is set.
+
 Then approve a candidate only after review:
 
 ```bash
@@ -74,4 +87,11 @@ Use `quickstart-check` as the safe local smoke test:
 python3 -m erdos_agent quickstart-check
 ```
 
-The next useful workflow step is reviewing one deduplicated candidate, approving it if it looks useful, and checking that approval creates a finding, pivots to similar open problems, and optionally queues follow-up jobs.
+The next useful workflow step is reviewing the current EP43 candidates:
+
+- `ep0043-r002`: `On Sum Sets of Sidon Sets, 1.`
+- `ep0043-r003`: `Popular differences and generalized Sidon sets`
+
+Approve one only if source review shows it is useful for the additive Sidon/difference-set
+formulation, then check that approval creates a finding, pivots to similar open problems,
+and optionally queues follow-up jobs.

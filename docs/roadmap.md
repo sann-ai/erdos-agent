@@ -187,4 +187,12 @@ The current `transfer-search` is simple. Later versions should cluster problems 
 
 ## Recommended Immediate Next Step
 
-With the current review queue empty, either run new targeted literature searches for the Sidon cluster or improve source-risk filtering for known-bad/off-context search results before queuing another experiment.
+Source-check the two current EP43 targeted-search candidates:
+
+- `ep0043-r002`: `On Sum Sets of Sidon Sets, 1.`
+- `ep0043-r003`: `Popular differences and generalized Sidon sets`
+
+If either is useful mathematical background for the additive Sidon/difference-set
+formulation, approve it and queue the top three pivot jobs. If both are only keyword
+matches, mark them with a human review decision and use that negative data to tighten
+Sidon-context risk flags.

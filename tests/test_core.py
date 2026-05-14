@@ -31,6 +31,7 @@ from erdos_agent.core import (
     preview_promotion_candidate,
     promote_literature_search_result,
     quickstart_check,
+    read_json,
     record_literature_finding,
     record_math_example,
     record_promotion_candidate_decision,
@@ -38,6 +39,7 @@ from erdos_agent.core import (
     render_anonymous_result_cards,
     render_literature_search_markdown,
     score_problem,
+    search_literature_for_problem,
     similarity_score,
     supervisor_step,
     make_search_queries,
@@ -243,6 +245,33 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(queries[0], "prime powers of two")
         self.assertIn("additive basis number theory", queries)
 
+    def test_manual_literature_queries_can_replace_generated_queries(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "data/problems/ep0001.json",
+                {
+                    "number": 1,
+                    "problem_id": "ep0001",
+                    "statement_raw": "If A,B are two Sidon sets such that (A-A) cap (B-B) = {0}.",
+                    "tags": ["number theory", "sidon sets", "additive combinatorics"],
+                },
+            )
+
+            result = search_literature_for_problem(
+                root,
+                1,
+                sources=[],
+                manual_queries=["Sidon disjoint difference sets"],
+            )
+            payload = read_json(root / "reports/literature/search/ep0001.json")
+
+            self.assertEqual(result["result_count"], 0)
+            self.assertEqual(payload["queries"], ["Sidon disjoint difference sets"])
+            self.assertTrue(payload["generated_queries"])
+            self.assertFalse(payload["include_generated_queries"])
+
     def test_filter_literature_results_removes_unrelated_hits(self):
         problem = {
             "statement_raw": "Is every large integer the sum of a prime and powers of two?",
@@ -256,6 +285,25 @@ class CoreTests(unittest.TestCase):
         filtered = filter_literature_results(problem, results)
         self.assertEqual(len(filtered), 1)
         self.assertIn("prime", filtered[0]["relevance_terms"])
+
+    def test_filter_literature_results_adds_risk_flags_and_adjusted_score(self):
+        problem = {
+            "statement_raw": "If A,B are two Sidon sets such that (A-A) cap (B-B) = {0}.",
+            "tags": ["number theory", "sidon sets", "additive combinatorics"],
+        }
+        results = [
+            {
+                "title": "An improved upper bound for the size of the multiplicative 3-Sidon sets",
+                "abstract_snippet": "We say that a set is a multiplicative 3-Sidon set.",
+                "venue": "",
+            }
+        ]
+
+        filtered = filter_literature_results(problem, results)
+
+        self.assertEqual(len(filtered), 1)
+        self.assertIn("context_mismatch_multiplicative_sidon", filtered[0]["risk_flags"])
+        self.assertLess(filtered[0]["adjusted_relevance_score"], filtered[0]["relevance_score"])
 
     def test_similarity_score_uses_tags_terms_and_references(self):
         seed = {
@@ -635,6 +683,62 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(hidden["returned"], 0)
             self.assertEqual(visible["returned"], 1)
             self.assertEqual(visible["items"][0]["status"], "needs_more_reading")
+
+    def test_candidate_decision_does_not_follow_reused_result_index(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            search_path = root / "reports/literature/search/ep0001.json"
+            write_json(
+                search_path,
+                {
+                    "problem_id": "ep0001",
+                    "queries": ["sidon systems"],
+                    "results": [
+                        {
+                            "source": "crossref",
+                            "title": "A stale false lead",
+                            "identifier": "10.1000/stale-lead",
+                            "abstract_snippet": "A useful abstract.",
+                            "relevance_terms": ["sidon", "systems"],
+                            "relevance_score": 3,
+                        }
+                    ],
+                },
+            )
+            build_promotion_candidate_report(root, min_score=1)
+            record_promotion_candidate_decision(
+                root,
+                "ep0001-r001",
+                decision="rejected",
+                reviewer="human-a",
+                notes=["wrong paper"],
+            )
+            write_json(
+                search_path,
+                {
+                    "problem_id": "ep0001",
+                    "queries": ["sidon systems"],
+                    "results": [
+                        {
+                            "source": "crossref",
+                            "title": "A fresh plausible lead",
+                            "identifier": "10.1000/fresh-lead",
+                            "abstract_snippet": "A useful abstract.",
+                            "relevance_terms": ["sidon", "systems"],
+                            "relevance_score": 3,
+                        }
+                    ],
+                },
+            )
+
+            hidden = build_promotion_candidate_report(root, min_score=1)
+            visible = build_promotion_candidate_report(root, min_score=1, include_decided=True)
+
+            self.assertEqual(hidden["returned"], 1)
+            self.assertEqual(hidden["items"][0]["candidate_id"], "ep0001-r001")
+            self.assertEqual(hidden["items"][0]["status"], "candidate")
+            self.assertEqual(visible["items"][0]["status"], "candidate")
 
     def test_review_candidate_penalizes_multiplicative_sidon_for_additive_problem(self):
         with TemporaryDirectory() as tmp:

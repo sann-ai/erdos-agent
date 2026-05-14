@@ -271,7 +271,27 @@ Outcome:
 - `ep0043-r001` was marked `rejected`.
 - The source is a valid multiplicative 3-Sidon paper, but EP43 is an additive Sidon/difference-set problem.
 - Multiplicative Sidon hits now receive `context_mismatch_multiplicative_sidon` and a review-score penalty for additive Sidon problem contexts.
-- The default review list now has zero visible candidates.
+- At that point, the default review list had zero visible candidates.
+
+### Experiment 003 Targeted EP43 Search
+
+Added:
+
+- `docs/experiments/003_ep0043_targeted_search.md`
+- manual `--query` support for `literature-search`
+- source-search payload fields for `manual_queries`, `generated_queries`, and `include_generated_queries`
+- search-result-level risk flags and adjusted relevance scores
+- stable-key-only review decision matching
+
+Outcome:
+
+- Re-ran EP43 literature search with targeted additive Sidon/difference-set queries.
+- Default review candidates are now:
+  - `ep0043-r002`: `On Sum Sets of Sidon Sets, 1.`
+  - `ep0043-r003`: `Popular differences and generalized Sidon sets`
+- Built human review packets and approval dry-run previews for both candidates.
+- Fixed the result-index decision bug: an old decision attached to `ep0043-r002` no longer follows that position if a regenerated search artifact makes `ep0043-r002` refer to a different paper.
+- The withdrawn 2023 `The structure of Sidon set systems` cluster remains marked `needs_more_reading` by stable title/arXiv/Crossref keys.
 
 Purpose:
 

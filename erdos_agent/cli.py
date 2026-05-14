@@ -163,6 +163,8 @@ def build_parser() -> argparse.ArgumentParser:
     lit_search_parser.add_argument("--source", action="append", choices=["arxiv", "crossref"], help="Repeatable source. Defaults to arxiv and crossref.")
     lit_search_parser.add_argument("--limit", type=int, default=5, help="Results per query/source.")
     lit_search_parser.add_argument("--query-limit", type=int, default=3, help="Number of generated queries to run.")
+    lit_search_parser.add_argument("--query", action="append", default=[], help="Repeatable manual query. If set, generated queries are skipped unless --include-generated-queries is used.")
+    lit_search_parser.add_argument("--include-generated-queries", action="store_true", help="Use manual queries first, then generated queries up to --query-limit.")
 
     review_search_parser = subparsers.add_parser("review-search-results", help="Build a Supervisor review list for literature search results.")
     review_search_parser.add_argument("--limit", type=int, default=20)
@@ -621,6 +623,8 @@ def run_literature_search(root: Path, args: argparse.Namespace) -> None:
         sources=args.source,
         limit=args.limit,
         query_limit=args.query_limit,
+        manual_queries=args.query,
+        include_generated_queries=args.include_generated_queries,
     )
     print(f"Found {result['result_count']} results")
     for artifact in result["artifacts"]:

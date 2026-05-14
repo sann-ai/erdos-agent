@@ -126,6 +126,19 @@ reports/analogies/ep0728.json
 python3 -m erdos_agent literature-search 9 --source arxiv --source crossref --limit 5 --query-limit 3
 ```
 
+ステートメント由来の自動クエリではなく、人間が指定した狙い撃ちクエリだけで検索する場合:
+
+```bash
+python3 -m erdos_agent literature-search 43 \
+  --source arxiv \
+  --source crossref \
+  --limit 5 \
+  --query "Sidon sets disjoint difference sets" \
+  --query "two Sidon sets disjoint differences"
+```
+
+手動クエリに加えて自動生成クエリも走らせる場合は `--include-generated-queries` を付けます。
+
 複数の検索結果から、Supervisorが見るpromotion候補リストを作る場合:
 
 ```bash
