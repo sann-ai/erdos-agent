@@ -57,6 +57,8 @@ python3 -m erdos_agent mark-promotion-candidate ep0009-r001 --decision rejected 
 
 The review list deduplicates likely identical papers across arXiv/Crossref and across multiple seed problems. Folded matches remain visible as `related_candidates` and `related_problem_ids`, so a human can still see that one paper may matter for several problems without reviewing the same title repeatedly.
 
+The review list also carries source/context risk flags. For example, multiplicative Sidon papers are scored down when the local problem is about additive Sidon or difference-set structure.
+
 Direct promotion is also available for one-off local trials:
 
 ```bash

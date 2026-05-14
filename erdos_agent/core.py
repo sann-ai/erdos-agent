@@ -1264,11 +1264,18 @@ def promotion_candidate_from_search_result(
     candidate_id = f"{problem_id}-r{result_index:03d}"
     promotion_path = root / "reports" / "literature" / "promotions" / f"{candidate_id}.json"
     dedupe_keys = literature_result_dedupe_keys(result)
+    problem = read_problem_if_available(root, problem_id)
+    risk_flags = promotion_candidate_risk_flags(problem, result)
+    risk_penalty = promotion_candidate_risk_penalty(risk_flags)
+    base_review_score = promotion_review_score(result)
     return {
         "candidate_id": candidate_id,
         "problem_id": problem_id,
         "result_index": result_index,
-        "review_score": promotion_review_score(result),
+        "review_score": max(0, base_review_score - risk_penalty),
+        "base_review_score": base_review_score,
+        "risk_penalty": risk_penalty,
+        "risk_flags": risk_flags,
         "relevance_score": int(result.get("relevance_score") or 0),
         "source": result.get("source", ""),
         "title": result.get("title", ""),
@@ -1289,12 +1296,63 @@ def promotion_candidate_from_search_result(
     }
 
 
+def read_problem_if_available(root: Path, problem_id: str | int) -> dict[str, Any]:
+    path = problem_path(root, problem_id)
+    if not path.exists():
+        return {}
+    return read_json(path)
+
+
 def promotion_review_score(result: dict[str, Any]) -> int:
     relevance_score = int(result.get("relevance_score") or 0)
     term_bonus = min(3, len(result.get("relevance_terms", [])) // 2)
     abstract_bonus = 1 if result.get("abstract_snippet") else 0
     identifier_bonus = 1 if result.get("identifier") else 0
     return relevance_score + term_bonus + abstract_bonus + identifier_bonus
+
+
+def promotion_candidate_risk_flags(problem: dict[str, Any], result: dict[str, Any]) -> list[str]:
+    result_text = " ".join(
+        str(part)
+        for part in [
+            result.get("title", ""),
+            result.get("abstract_snippet", ""),
+            result.get("venue", ""),
+            " ".join(str(item) for item in result.get("categories", [])),
+        ]
+    ).lower()
+    problem_text = problem_search_text(problem).lower() if problem else ""
+    flags: list[str] = []
+
+    additive_sidon_problem = (
+        "sidon" in problem_text
+        and "multiplicative" not in problem_text
+        and (
+            "additive" in problem_text
+            or "difference" in problem_text
+            or "a-a" in problem_text
+            or "sum" in problem_text
+        )
+    )
+    if additive_sidon_problem and "multiplicative" in result_text and "sidon" in result_text:
+        flags.append("context_mismatch_multiplicative_sidon")
+    if additive_sidon_problem and "completely sidon" in result_text and "operator" not in problem_text:
+        flags.append("context_mismatch_completely_sidon")
+    if additive_sidon_problem and ("algebraic geometry" in result_text or "jacobian" in result_text):
+        flags.append("context_mismatch_algebraic_geometry_sidon")
+    if "withdrawn" in result_text:
+        flags.append("source_risk_withdrawn")
+    return dedupe_strings(flags)
+
+
+def promotion_candidate_risk_penalty(flags: list[str]) -> int:
+    penalties = {
+        "context_mismatch_multiplicative_sidon": 8,
+        "context_mismatch_completely_sidon": 6,
+        "context_mismatch_algebraic_geometry_sidon": 4,
+        "source_risk_withdrawn": 10,
+    }
+    return sum(penalties.get(flag, 0) for flag in flags)
 
 
 def dedupe_promotion_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1377,6 +1435,9 @@ def render_promotion_candidate_report(report: dict[str, Any]) -> str:
                 f"- problem: {item['problem_id']}",
                 f"- result index: {item['result_index']}",
                 f"- review score: {item['review_score']}",
+                f"- base review score: {item.get('base_review_score', item['review_score'])}",
+                f"- risk penalty: {item.get('risk_penalty', 0)}",
+                f"- risk flags: {', '.join(item.get('risk_flags', [])) or 'none'}",
                 f"- source: {item['source']}",
                 f"- year: {item['year']}",
                 f"- title: {item['title'] or 'Untitled'}",
@@ -1568,6 +1629,9 @@ def render_promotion_candidate_packet(packet: dict[str, Any]) -> str:
         f"- problem: {candidate.get('problem_id', '')}",
         f"- result index: {candidate.get('result_index', '')}",
         f"- review score: {candidate.get('review_score', '')}",
+        f"- base review score: {candidate.get('base_review_score', candidate.get('review_score', ''))}",
+        f"- risk penalty: {candidate.get('risk_penalty', 0)}",
+        f"- risk flags: {', '.join(candidate.get('risk_flags', [])) or 'none'}",
         f"- source: {candidate.get('source', '')}",
         f"- year: {candidate.get('year', '')}",
         f"- title: {candidate.get('title') or 'Untitled'}",
@@ -1752,6 +1816,8 @@ def render_promotion_candidate_preview(preview: dict[str, Any]) -> str:
         "",
         f"- problem: {candidate.get('problem_id', '')}",
         f"- title: {candidate.get('title') or 'Untitled'}",
+        f"- review score: {candidate.get('review_score', '')}",
+        f"- risk flags: {', '.join(candidate.get('risk_flags', [])) or 'none'}",
         f"- source: {candidate.get('source', '')}",
         f"- id: {candidate.get('identifier', '')}",
         f"- url: {candidate.get('url', '')}",

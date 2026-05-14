@@ -455,7 +455,7 @@ class CoreTests(unittest.TestCase):
                     },
                 )
 
-            report = build_promotion_candidate_report(root, min_score=1)
+            report = build_promotion_candidate_report(root, min_score=0)
 
             self.assertEqual(report["raw_candidate_count"], 2)
             self.assertEqual(report["returned"], 1)
@@ -635,6 +635,45 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(hidden["returned"], 0)
             self.assertEqual(visible["returned"], 1)
             self.assertEqual(visible["items"][0]["status"], "needs_more_reading")
+
+    def test_review_candidate_penalizes_multiplicative_sidon_for_additive_problem(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "data/problems/ep0043.json",
+                {
+                    "number": 43,
+                    "problem_id": "ep0043",
+                    "status_site": "open",
+                    "tags": ["number theory", "sidon sets", "additive combinatorics"],
+                    "statement_raw": "If A,B are two Sidon sets such that (A-A) cap (B-B) = {0}.",
+                },
+            )
+            write_json(
+                root / "reports/literature/search/ep0043.json",
+                {
+                    "problem_id": "ep0043",
+                    "queries": ["Sidon set additive combinatorics"],
+                    "results": [
+                        {
+                            "source": "crossref",
+                            "title": "An improved upper bound for the size of the multiplicative 3-Sidon sets",
+                            "identifier": "10.1142/s1793042119500957",
+                            "abstract_snippet": "We say that a set is a multiplicative 3-Sidon set.",
+                            "relevance_terms": ["bound", "improved", "sidon", "size"],
+                            "relevance_score": 4,
+                        }
+                    ],
+                },
+            )
+
+            report = build_promotion_candidate_report(root, min_score=0)
+            item = report["items"][0]
+
+            self.assertIn("context_mismatch_multiplicative_sidon", item["risk_flags"])
+            self.assertGreater(item["risk_penalty"], 0)
+            self.assertLess(item["review_score"], item["base_review_score"])
 
     def test_supervisor_step_includes_review_candidate_summary(self):
         with TemporaryDirectory() as tmp:

@@ -187,4 +187,4 @@ The current `transfer-search` is simple. Later versions should cluster problems 
 
 ## Recommended Immediate Next Step
 
-Review `ep0043-r001`; if it is off-topic multiplicative Sidon material, mark it rejected and then improve risk-aware literature filtering or make computation workers generate runnable scripts.
+With the current review queue empty, either run new targeted literature searches for the Sidon cluster or improve source-risk filtering for known-bad/off-context search results before queuing another experiment.

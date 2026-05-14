@@ -259,6 +259,20 @@ Outcome:
 - `ep0039` now has a greedy infinite Sidon prefix table.
 - `ep0041` now has exact small B3/triple-sum data through `N=14`.
 
+### Experiment 002 Candidate Review
+
+Added:
+
+- `docs/experiments/002_ep0043_r001_review.md`
+- context-aware review risk flags for additive Sidon problems
+
+Outcome:
+
+- `ep0043-r001` was marked `rejected`.
+- The source is a valid multiplicative 3-Sidon paper, but EP43 is an additive Sidon/difference-set problem.
+- Multiplicative Sidon hits now receive `context_mismatch_multiplicative_sidon` and a review-score penalty for additive Sidon problem contexts.
+- The default review list now has zero visible candidates.
+
 Purpose:
 
 - Give new contributors a small local workflow from ingest through review-gated literature promotion.
