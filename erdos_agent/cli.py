@@ -23,6 +23,7 @@ from .core import (
     load_problem,
     make_blind_packet,
     make_claim_card,
+    make_difference_packing_proof_route,
     make_literature_packet,
     make_statement_audit,
     normalize_problem_id,
@@ -154,6 +155,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     redact_parser = subparsers.add_parser("redact", help="Generate a blind solver packet.")
     redact_parser.add_argument("problem_id")
+
+    proof_route_parser = subparsers.add_parser("proof-route-packet", help="Generate a source-aware proof route note and redacted blind packet.")
+    proof_route_parser.add_argument("problem_id")
+    proof_route_parser.add_argument("--route", default="difference-packing", choices=["difference-packing"])
 
     lit_parser = subparsers.add_parser("literature-packet", help="Generate an anonymous literature search packet.")
     lit_parser.add_argument("problem_id")
@@ -307,6 +312,10 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "redact":
             run_redact(root, args.problem_id)
+            return 0
+
+        if args.command == "proof-route-packet":
+            run_proof_route_packet(root, args)
             return 0
 
         if args.command == "literature-packet":
@@ -605,6 +614,15 @@ def run_redact(root: Path, problem_id: str) -> str:
     if manifest["statement_leak_patterns"]:
         print("warning: statement may leak source/status context; review manifest before blind solving.")
     return task_id
+
+
+def run_proof_route_packet(root: Path, args: argparse.Namespace) -> None:
+    if args.route != "difference-packing":
+        raise ValueError(f"Unsupported proof route: {args.route}")
+    result = make_difference_packing_proof_route(root, args.problem_id)
+    print(f"Built proof route packet: {result['task_id']}")
+    for artifact in result["artifacts"]:
+        print(f"artifact: {artifact}")
 
 
 def run_literature_packet(root: Path, problem_id: str) -> str:

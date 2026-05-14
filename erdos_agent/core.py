@@ -44,6 +44,7 @@ DEFAULT_DIRS = [
     "reports/statement_audits",
     "reports/attempts",
     "reports/referee",
+    "reports/proof_routes",
     "packets/blind",
     "packets/literature",
     "agent_runs",
@@ -685,6 +686,155 @@ Return the result in these sections:
         "created_at": date.today().isoformat(),
     }
     return task_id, content, manifest
+
+
+def make_difference_packing_proof_route(root: Path, problem_id: str | int) -> dict[str, Any]:
+    problem = load_problem(root, problem_id)
+    normalized = problem.get("problem_id") or normalize_problem_id(problem["number"])
+    statement = problem.get("statement_raw") or problem.get("statement_latex") or ""
+    task_content = difference_packing_blind_task()
+    task_id = task_id_for_statement(task_content)
+    source_content = render_difference_packing_source_note(problem, task_id=task_id)
+    manifest = {
+        "task_id": task_id,
+        "problem_id": normalized,
+        "route": "difference_packing",
+        "hidden_fields": [
+            "number",
+            "problem_id",
+            "url",
+            "status_site",
+            "status_local",
+            "title",
+            "prize",
+            "known_references",
+            "comments_summary",
+            "source_literature",
+        ],
+        "statement_leak_patterns": redaction_leaks(task_content),
+        "created_at": date.today().isoformat(),
+        "source_statement_digest": hashlib.sha256(statement.strip().encode("utf-8")).hexdigest()[:12],
+    }
+    source_path = root / "reports" / "proof_routes" / f"{normalized}-difference-packing.md"
+    packet_path = root / "packets" / "blind" / f"{task_id}-difference-packing.md"
+    manifest_path = root / "data" / "manifests" / f"{task_id}-difference-packing.json"
+    write_text(source_path, source_content)
+    write_text(packet_path, task_content)
+    write_json(manifest_path, manifest)
+    append_log(root, f"proof_route_packet | {normalized} | difference_packing | {task_id}")
+    return {
+        "task_id": task_id,
+        "problem_id": normalized,
+        "route": "difference_packing",
+        "artifacts": [
+            str(source_path.relative_to(root)),
+            str(packet_path.relative_to(root)),
+            str(manifest_path.relative_to(root)),
+        ],
+    }
+
+
+def difference_packing_blind_task() -> str:
+    return """# Mathematical Task: Difference Packing for Sidon Sets
+
+## Definitions
+
+For a finite set S of integers, define
+
+```text
+D+(S) = {x-y : x, y in S and x > y}.
+```
+
+Call S a Sidon set if every positive difference in D+(S) occurs from at most one
+ordered pair x > y in S. Equivalently, |D+(S)| = binom(|S|, 2).
+
+For N >= 1, let f(N) be the maximum size of a Sidon subset of {1, ..., N}.
+
+## Main Question
+
+Let A, B be Sidon subsets of {1, ..., N} such that
+
+```text
+D+(A) cap D+(B) = empty.
+```
+
+Is it true that
+
+```text
+binom(|A|, 2) + binom(|B|, 2) <= binom(f(N), 2) + O(1)?
+```
+
+## Equal-Size Variant
+
+If |A| = |B|, is there an absolute constant c > 0 such that
+
+```text
+binom(|A|, 2) + binom(|B|, 2)
+  <= (1 - c + o(1)) binom(f(N), 2)?
+```
+
+## Suggested Attack Surface
+
+- Treat D+(A) and D+(B) as two disjoint packed difference masks inside {1, ..., N-1}.
+- Try to prove upper bounds from the fact that each mask comes from a Sidon set, not an arbitrary difference set.
+- Look for an injection, compression, or transformation that converts the two disjoint masks into the difference mask of one large Sidon set, losing only O(1) differences.
+- Try hard to disprove the first inequality by constructing two medium-sized Sidon sets with unusually complementary difference masks.
+- For the equal-size variant, look for a density or energy obstruction that prevents two large equal Sidon sets from having disjoint difference masks.
+
+## Output Contract
+
+Return:
+
+1. Exact formal statement considered
+2. Edge cases and small examples
+3. A proof attempt or counterexample family
+4. Any lemma that would imply the main question
+5. Known gaps or suspected false steps
+6. A finite statement suitable for later formalization
+"""
+
+
+def render_difference_packing_source_note(problem: dict[str, Any], *, task_id: str) -> str:
+    problem_id = problem.get("problem_id") or normalize_problem_id(problem["number"])
+    statement = problem.get("statement_raw") or problem.get("statement_latex") or ""
+    return f"""# Proof Route: Difference Packing for {problem_id}
+
+Generated: {date.today().isoformat()}
+
+This is a source-aware Supervisor note. Do not pass this file to Blind Solver.
+
+## Original Statement
+
+{statement or 'TODO'}
+
+## Derived Blind Task
+
+- task id: `{task_id}`
+- blind packet: `packets/blind/{task_id}-difference-packing.md`
+
+The blind task rewrites the problem as a finite difference-mask packing question for
+Sidon sets and omits problem number, official status, source URL, references, and
+literature metadata.
+
+## Computation Signal
+
+The current local exact harness is:
+
+```bash
+python3 computations/{problem_id}/search.py --max-n 20
+```
+
+In the latest local run through `N = 20`, the maximum observed unrestricted excess over
+`binom(f(N), 2)` was `3`, and the maximum observed equal-size excess was `2`.
+
+## Supervisor Notes
+
+- This is not a proof or novelty claim.
+- The route is currently proof-search material because small cases do not show a large
+  counterexample signal.
+- Literature candidates about popular differences or generalized Sidon sets are
+  source-aware and should stay outside the blind packet unless manually anonymized.
+"""
 
 
 def make_literature_packet(problem: dict[str, Any]) -> tuple[str, str]:
@@ -3012,6 +3162,8 @@ def run_computation_worker(root: Path, problem_id: str | int) -> dict[str, Any]:
 def computation_mode(problem: dict[str, Any]) -> str:
     statement = (problem.get("statement_raw") or problem.get("statement_latex") or "").lower()
     tags = " ".join(str(tag).lower() for tag in problem.get("tags", []))
+    if "sidon" in statement and "a-a" in statement and "b-b" in statement:
+        return "sidon_pair_disjoint_diffs_exact"
     if "triple sums" in statement or "a+b+c" in statement:
         return "b3_max_exact"
     if "infinite sidon" in statement or ("infinite" in statement and "sidon" in statement):
@@ -3141,6 +3293,82 @@ def b3_max_exact(n: int) -> tuple[int, list[int]]:
     return len(best), best
 
 
+def binom2(size: int) -> int:
+    return size * (size - 1) // 2
+
+
+def sidon_subsets_with_diff_masks(n: int) -> list[tuple[int, list[int], int]]:
+    subsets: list[tuple[int, list[int], int]] = []
+
+    def backtrack(start: int, chosen: list[int], mask: int) -> None:
+        subsets.append((len(chosen), chosen[:], mask))
+        for x in range(start, n + 1):
+            new_mask = 0
+            ok = True
+            for y in chosen:
+                bit = 1 << (x - y)
+                if mask & bit or new_mask & bit:
+                    ok = False
+                    break
+                new_mask |= bit
+            if not ok:
+                continue
+            chosen.append(x)
+            backtrack(x + 1, chosen, mask | new_mask)
+            chosen.pop()
+
+    backtrack(1, [], 0)
+    subsets.sort(key=lambda item: (binom2(item[0]), item[0], item[1]), reverse=True)
+    return subsets
+
+
+def sidon_pair_disjoint_diffs_exact(n: int, *, equal_size: bool = False) -> dict[str, object]:
+    subsets = sidon_subsets_with_diff_masks(n)
+    f_size = max((size for size, _, _ in subsets), default=0)
+    baseline = binom2(f_size)
+    best_score = -1
+    best_balance = -1
+    best_min_size = -1
+    best_a: list[int] = []
+    best_b: list[int] = []
+
+    for size_a, set_a, mask_a in subsets:
+        score_a = binom2(size_a)
+        for size_b, set_b, mask_b in subsets:
+            if equal_size and size_a != size_b:
+                continue
+            score = score_a + binom2(size_b)
+            if score < best_score:
+                continue
+            if mask_a & mask_b:
+                continue
+            balance = min(score_a, binom2(size_b))
+            min_size = min(size_a, size_b)
+            if (
+                score > best_score
+                or (score == best_score and (balance, min_size) > (best_balance, best_min_size))
+                or (
+                    score == best_score
+                    and (balance, min_size) == (best_balance, best_min_size)
+                    and (set_a, set_b) < (best_a, best_b)
+                )
+            ):
+                best_score = score
+                best_balance = balance
+                best_min_size = min_size
+                best_a = set_a[:]
+                best_b = set_b[:]
+
+    return {{
+        "value": best_score,
+        "A": best_a,
+        "B": best_b,
+        "f_N": f_size,
+        "baseline": baseline,
+        "excess": best_score - baseline,
+    }}
+
+
 def greedy_sidon(limit: int) -> list[int]:
     values: list[int] = []
     x = 1
@@ -3163,6 +3391,27 @@ def run_table(max_n: int) -> list[dict[str, object]]:
                 "n": bound,
                 "value": sum(1 for value in values if value <= bound),
                 "witness": [value for value in values if value <= bound],
+            }})
+        return rows
+
+    if MODE == "sidon_pair_disjoint_diffs_exact":
+        for n in range(1, max_n + 1):
+            full = sidon_pair_disjoint_diffs_exact(n)
+            equal = sidon_pair_disjoint_diffs_exact(n, equal_size=True)
+            rows.append({{
+                "n": n,
+                "value": full["value"],
+                "witness": {{
+                    "A": full["A"],
+                    "B": full["B"],
+                    "f_N": full["f_N"],
+                    "baseline": full["baseline"],
+                    "excess": full["excess"],
+                    "equal_size_value": equal["value"],
+                    "equal_size_A": equal["A"],
+                    "equal_size_B": equal["B"],
+                    "equal_size_excess": equal["excess"],
+                }},
             }})
         return rows
 
@@ -3222,6 +3471,8 @@ def make_computation_results(problem: dict[str, Any], *, mode: str | None = None
 
 
 def computation_default_max_n(mode: str) -> int:
+    if mode == "sidon_pair_disjoint_diffs_exact":
+        return 14
     if mode == "b3_max_exact":
         return 14
     if mode == "greedy_sidon_prefix":
@@ -3241,6 +3492,30 @@ def computation_rows(mode: str, max_n: int) -> list[dict[str, Any]]:
                     "n": bound,
                     "value": sum(1 for value in values if value <= bound),
                     "witness": [value for value in values if value <= bound],
+                }
+            )
+        return rows
+
+    if mode == "sidon_pair_disjoint_diffs_exact":
+        rows = []
+        for n in range(1, max_n + 1):
+            full = sidon_pair_disjoint_diffs_exact_values(n)
+            equal = sidon_pair_disjoint_diffs_exact_values(n, equal_size=True)
+            rows.append(
+                {
+                    "n": n,
+                    "value": full["value"],
+                    "witness": {
+                        "A": full["A"],
+                        "B": full["B"],
+                        "f_N": full["f_N"],
+                        "baseline": full["baseline"],
+                        "excess": full["excess"],
+                        "equal_size_value": equal["value"],
+                        "equal_size_A": equal["A"],
+                        "equal_size_B": equal["B"],
+                        "equal_size_excess": equal["excess"],
+                    },
                 }
             )
         return rows
@@ -3303,6 +3578,82 @@ def is_b3_values(values: list[int]) -> bool:
             return False
         seen.add(total)
     return True
+
+
+def binom2_values(size: int) -> int:
+    return size * (size - 1) // 2
+
+
+def sidon_subsets_with_diff_masks_values(n: int) -> list[tuple[int, list[int], int]]:
+    subsets: list[tuple[int, list[int], int]] = []
+
+    def backtrack(start: int, chosen: list[int], mask: int) -> None:
+        subsets.append((len(chosen), chosen[:], mask))
+        for x in range(start, n + 1):
+            new_mask = 0
+            ok = True
+            for y in chosen:
+                bit = 1 << (x - y)
+                if mask & bit or new_mask & bit:
+                    ok = False
+                    break
+                new_mask |= bit
+            if not ok:
+                continue
+            chosen.append(x)
+            backtrack(x + 1, chosen, mask | new_mask)
+            chosen.pop()
+
+    backtrack(1, [], 0)
+    subsets.sort(key=lambda item: (binom2_values(item[0]), item[0], item[1]), reverse=True)
+    return subsets
+
+
+def sidon_pair_disjoint_diffs_exact_values(n: int, *, equal_size: bool = False) -> dict[str, Any]:
+    subsets = sidon_subsets_with_diff_masks_values(n)
+    f_size = max((size for size, _, _ in subsets), default=0)
+    baseline = binom2_values(f_size)
+    best_score = -1
+    best_balance = -1
+    best_min_size = -1
+    best_a: list[int] = []
+    best_b: list[int] = []
+
+    for size_a, set_a, mask_a in subsets:
+        score_a = binom2_values(size_a)
+        for size_b, set_b, mask_b in subsets:
+            if equal_size and size_a != size_b:
+                continue
+            score = score_a + binom2_values(size_b)
+            if score < best_score:
+                continue
+            if mask_a & mask_b:
+                continue
+            balance = min(score_a, binom2_values(size_b))
+            min_size = min(size_a, size_b)
+            if (
+                score > best_score
+                or (score == best_score and (balance, min_size) > (best_balance, best_min_size))
+                or (
+                    score == best_score
+                    and (balance, min_size) == (best_balance, best_min_size)
+                    and (set_a, set_b) < (best_a, best_b)
+                )
+            ):
+                best_score = score
+                best_balance = balance
+                best_min_size = min_size
+                best_a = set_a[:]
+                best_b = set_b[:]
+
+    return {
+        "value": best_score,
+        "A": best_a,
+        "B": best_b,
+        "f_N": f_size,
+        "baseline": baseline,
+        "excess": best_score - baseline,
+    }
 
 
 def greedy_sidon_values(limit: int) -> list[int]:

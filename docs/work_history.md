@@ -293,6 +293,25 @@ Outcome:
 - Fixed the result-index decision bug: an old decision attached to `ep0043-r002` no longer follows that position if a regenerated search artifact makes `ep0043-r002` refer to a different paper.
 - The withdrawn 2023 `The structure of Sidon set systems` cluster remains marked `needs_more_reading` by stable title/arXiv/Crossref keys.
 
+### Experiment 004 EP43 Pair Computation
+
+Added:
+
+- `docs/experiments/004_ep0043_pair_computation.md`
+- computation mode `sidon_pair_disjoint_diffs_exact`
+- exact enumeration of Sidon subset positive-difference masks
+- unrestricted and equal-size Sidon-pair objective reporting
+- `proof-route-packet 43 --route difference-packing`
+
+Outcome:
+
+- Generated local EP43 computation artifacts under `computations/ep0043/`.
+- Ran exact search through `N = 20`.
+- The maximum observed excess over `binom(f(N), 2)` was `3`.
+- The maximum observed equal-size excess was `2`.
+- No small counterexample signal was found; the data currently supports treating EP43 as a plausible proof-search target rather than a likely disproof target.
+- Generated a source-aware Supervisor proof-route note plus a redacted Blind Solver packet for the difference-mask formulation.
+
 Purpose:
 
 - Give new contributors a small local workflow from ingest through review-gated literature promotion.

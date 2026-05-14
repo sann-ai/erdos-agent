@@ -227,6 +227,21 @@ python3 -m erdos_agent run-next-agent
 python3 -m erdos_agent complete-run RUN_ID --status done --summary "Created literature report" --artifact reports/literature/ep0025.md
 ```
 
+EP43のような「2つのSidon集合の差集合が交わらない」問題では、computation worker が
+専用の小ケース探索ハーネスを作ります。
+
+```bash
+python3 -m erdos_agent create-run --problem 43 --agent computation
+python3 -m erdos_agent run-next-agent --agent computation
+python3 computations/ep0043/search.py --max-n 20
+```
+
+計算結果から、ソース情報を含むSupervisor用メモと、Blind Solver用の匿名化された証明探索packetを作る場合:
+
+```bash
+python3 -m erdos_agent proof-route-packet 43 --route difference-packing
+```
+
 agentは今のところ以下を想定しています。
 
 ```text

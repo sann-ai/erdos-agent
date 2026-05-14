@@ -95,3 +95,28 @@ The next useful workflow step is reviewing the current EP43 candidates:
 Approve one only if source review shows it is useful for the additive Sidon/difference-set
 formulation, then check that approval creates a finding, pivots to similar open problems,
 and optionally queues follow-up jobs.
+
+EP43 also has a local exact-computation harness now:
+
+```bash
+python3 computations/ep0043/search.py --max-n 20
+```
+
+The current small-case result through `N = 20` has maximum unrestricted excess `3` over
+`binom(f(N), 2)` and maximum equal-size excess `2`. A good next proof-oriented task is
+to convert this into a redacted Blind Solver packet about packing disjoint positive
+difference masks.
+
+That packet can be regenerated with:
+
+```bash
+python3 -m erdos_agent proof-route-packet 43 --route difference-packing
+```
+
+The local generated artifacts are:
+
+```text
+reports/proof_routes/ep0043-difference-packing.md
+packets/blind/math-task-b2ab29b556e1-difference-packing.md
+data/manifests/math-task-b2ab29b556e1-difference-packing.json
+```

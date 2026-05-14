@@ -187,7 +187,18 @@ The current `transfer-search` is simple. Later versions should cluster problems 
 
 ## Recommended Immediate Next Step
 
-Source-check the two current EP43 targeted-search candidates:
+Turn the EP43 small-case computation into a proof-search packet.
+
+Current evidence:
+
+- exact Sidon-pair search has been run through `N = 20`
+- maximum observed excess over `binom(f(N), 2)` is `3`
+- maximum observed equal-size excess is `2`
+
+Next, hand the generated `difference-packing` blind packet to a solver agent and ask for
+a proof attempt, counterexample family, or lemma that would imply the main bound.
+
+Also source-check the two current EP43 targeted-search candidates:
 
 - `ep0043-r002`: `On Sum Sets of Sidon Sets, 1.`
 - `ep0043-r003`: `Popular differences and generalized Sidon sets`

@@ -23,6 +23,7 @@ from erdos_agent.core import (
     extract_problem_statement_from_html,
     github_record_to_problem,
     make_blind_packet,
+    make_difference_packing_proof_route,
     normalize_problem_id,
     parse_github_problems_yaml,
     parse_arxiv_results,
@@ -66,6 +67,37 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("728", content)
         self.assertNotIn("open", content.lower())
         self.assertEqual(manifest["problem_id"], "ep0728")
+
+    def test_difference_packing_proof_route_writes_redacted_packet(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "data/problems/ep0043.json",
+                {
+                    "number": 43,
+                    "problem_id": "ep0043",
+                    "status_site": "open",
+                    "url": "https://example.invalid/43",
+                    "statement_raw": (
+                        "If A,B subset {1,...,N} are two Sidon sets such that "
+                        "(A-A) cap (B-B) = {0}, compare binom(|A|,2)+binom(|B|,2)."
+                    ),
+                    "known_references": ["Source metadata"],
+                },
+            )
+
+            result = make_difference_packing_proof_route(root, 43)
+            source_path, packet_path, manifest_path = [root / artifact for artifact in result["artifacts"]]
+            packet = packet_path.read_text(encoding="utf-8")
+            manifest = read_json(manifest_path)
+
+            self.assertTrue(source_path.exists())
+            self.assertIn("Difference Packing", packet)
+            self.assertNotIn("ep0043", packet)
+            self.assertNotIn("example.invalid", packet)
+            self.assertNotIn("open", packet.lower())
+            self.assertEqual(manifest["problem_id"], "ep0043")
 
     def test_score_recommends_literature_for_sparse_refs(self):
         problem = {
@@ -1150,6 +1182,44 @@ class CoreTests(unittest.TestCase):
             )
             self.assertIn("# mode=sidon_max_exact max_n=6", output.stdout)
             self.assertIn("6\t3\t", output.stdout)
+
+    def test_computation_worker_writes_sidon_pair_harness(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "data/problems/ep0043.json",
+                {
+                    "number": 43,
+                    "problem_id": "ep0043",
+                    "status_site": "open",
+                    "tags": ["number theory", "sidon sets", "additive combinatorics"],
+                    "statement_raw": (
+                        "If A,B subset {1,...,N} are two Sidon sets such that "
+                        "(A-A) cap (B-B) = {0}, compare binom(|A|,2)+binom(|B|,2)."
+                    ),
+                    "known_references": [],
+                    "oeis": [],
+                },
+            )
+            run = create_agent_run(root, agent="computation", problem_id=43)
+            done = execute_agent_run(root, run["run_id"])
+            script_path = root / "computations/ep0043/search.py"
+            results_path = root / "computations/ep0043/results.md"
+
+            self.assertEqual(done["status"], "done")
+            self.assertIn("sidon_pair_disjoint_diffs_exact", done["summary"])
+            self.assertIn("Mode: `sidon_pair_disjoint_diffs_exact`", results_path.read_text(encoding="utf-8"))
+            output = subprocess.run(
+                [sys.executable, str(script_path), "--max-n", "5"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn("# mode=sidon_pair_disjoint_diffs_exact max_n=5", output.stdout)
+            self.assertIn("5\t4\t", output.stdout)
+            self.assertIn("equal_size_value", output.stdout)
 
 
 if __name__ == "__main__":
