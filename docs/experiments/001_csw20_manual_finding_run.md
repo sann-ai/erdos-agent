@@ -101,8 +101,9 @@ The good news:
 
 The weaker news:
 
-- Computation workers currently only create plan stubs; they do not yet write runnable
-  `search.py` scripts or results tables.
+- Computation workers originally only created plan stubs; the follow-up computation
+  harness upgrade on 2026-05-14 added runnable `search.py` scripts and `results.md`
+  tables for Sidon-style MVP workers.
 - Literature search for `ep0042` and `ep0044` still surfaced the withdrawn 2023
   `The structure of Sidon set systems` result as the top hit, even though the
   `ep0043-r002` decision suppresses the same-paper duplicate in the promotion
@@ -114,7 +115,7 @@ The weaker news:
 
 ```text
 queued runs: 0
-completed runs: 16
+completed runs: 16 at initial experiment close; 19 after the 2026-05-14 computation harness rerun
 review candidates: 1
 visible candidate: ep0043-r001
 ```
@@ -143,7 +144,8 @@ The most important product of the run is actually negative information:
 - the 2023 structure paper should not be used as an approved finding without separating
   safe background content from the withdrawn main argument
 - the literature search needs stronger suppression/penalty for known-risk paper clusters
-- computation workers need to move from plan stubs to runnable scripts
+- computation workers needed to move from plan stubs to runnable scripts; this is now
+  partially addressed for Sidon-style MVP workers
 
 ## Recommended Next Step
 

@@ -68,8 +68,8 @@ Goal: make computation jobs reproducible.
 
 Tasks:
 
-- Create `computations/epNNNN/search.py` templates.
-- Add `results.md` logging conventions.
+- Create `computations/epNNNN/search.py` templates. Done for Sidon-style MVP workers.
+- Add `results.md` logging conventions. Done for Sidon-style MVP workers.
 - Add standard fields for parameters, seeds, bounds, hardware/runtime, and verification.
 - Support finite search/counterexample search plans.
 - Support OEIS small-value reproduction where appropriate.

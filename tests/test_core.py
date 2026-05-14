@@ -1,4 +1,6 @@
 import unittest
+import subprocess
+import sys
 from tempfile import TemporaryDirectory
 from pathlib import Path
 
@@ -967,7 +969,44 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(still_idle["status"], "idle")
             done = execute_next_agent_run(root, agent="computation")
             self.assertEqual(done["status"], "done")
+            self.assertIn("computations/ep0001/search.py", done["result_artifacts"])
+            self.assertIn("computations/ep0001/results.md", done["result_artifacts"])
             self.assertTrue((root / "agent_runs/last_run_next.json").exists())
+
+    def test_computation_worker_writes_runnable_sidon_harness(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            write_json(
+                root / "data/problems/ep0030.json",
+                {
+                    "number": 30,
+                    "problem_id": "ep0030",
+                    "status_site": "open",
+                    "tags": ["number theory", "sidon sets", "additive combinatorics"],
+                    "statement_raw": "Let h(N) be the maximum size of a Sidon set in {1,...,N}.",
+                    "known_references": [],
+                    "oeis": ["A003022"],
+                },
+            )
+            run = create_agent_run(root, agent="computation", problem_id=30)
+            done = execute_agent_run(root, run["run_id"])
+            script_path = root / "computations/ep0030/search.py"
+            results_path = root / "computations/ep0030/results.md"
+
+            self.assertEqual(done["status"], "done")
+            self.assertTrue(script_path.exists())
+            self.assertTrue(results_path.exists())
+            self.assertIn("Mode: `sidon_max_exact`", results_path.read_text(encoding="utf-8"))
+            output = subprocess.run(
+                [sys.executable, str(script_path), "--max-n", "6"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn("# mode=sidon_max_exact max_n=6", output.stdout)
+            self.assertIn("6\t3\t", output.stdout)
 
 
 if __name__ == "__main__":

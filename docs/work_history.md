@@ -241,6 +241,24 @@ Outcome:
 - Queue ended empty.
 - The next visible promotion candidate is `ep0043-r001`.
 
+### Computation Harness Upgrade
+
+Added:
+
+- computation worker generation of `computations/epNNNN/search.py`
+- computation worker generation of `computations/epNNNN/results.md`
+- runnable dependency-free small-case harnesses for:
+  - `sidon_max_exact`
+  - `greedy_sidon_prefix`
+  - `b3_max_exact`
+
+Outcome:
+
+- Re-ran computation jobs for `ep0030`, `ep0039`, and `ep0041`.
+- `ep0030` now has exact small `h(N)` data through `N=24`.
+- `ep0039` now has a greedy infinite Sidon prefix table.
+- `ep0041` now has exact small B3/triple-sum data through `N=14`.
+
 Purpose:
 
 - Give new contributors a small local workflow from ingest through review-gated literature promotion.

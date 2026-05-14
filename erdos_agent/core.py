@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import date, datetime
 from html.parser import HTMLParser
+from itertools import combinations_with_replacement
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -2907,19 +2908,42 @@ TODO
 def run_computation_worker(root: Path, problem_id: str | int) -> dict[str, Any]:
     problem = load_problem(root, problem_id)
     normalized = problem.get("problem_id") or normalize_problem_id(problem["number"])
-    path = root / "computations" / normalized / "README.md"
-    write_text(path, make_computation_plan(problem))
+    computation_dir = root / "computations" / normalized
+    readme_path = computation_dir / "README.md"
+    script_path = computation_dir / "search.py"
+    results_path = computation_dir / "results.md"
+    mode = computation_mode(problem)
+    write_text(readme_path, make_computation_plan(problem, mode=mode))
+    write_text(script_path, make_computation_script(problem, mode=mode))
+    write_text(results_path, make_computation_results(problem, mode=mode))
     return {
         "status": "done",
-        "summary": f"Created computation plan for {normalized}.",
-        "artifacts": [str(path.relative_to(root))],
+        "summary": f"Created runnable computation harness for {normalized} ({mode}).",
+        "artifacts": [
+            str(readme_path.relative_to(root)),
+            str(script_path.relative_to(root)),
+            str(results_path.relative_to(root)),
+        ],
     }
 
 
-def make_computation_plan(problem: dict[str, Any]) -> str:
+def computation_mode(problem: dict[str, Any]) -> str:
+    statement = (problem.get("statement_raw") or problem.get("statement_latex") or "").lower()
+    tags = " ".join(str(tag).lower() for tag in problem.get("tags", []))
+    if "triple sums" in statement or "a+b+c" in statement:
+        return "b3_max_exact"
+    if "infinite sidon" in statement or ("infinite" in statement and "sidon" in statement):
+        return "greedy_sidon_prefix"
+    if "sidon" in statement or "sidon" in tags:
+        return "sidon_max_exact"
+    return "finite_subset_sanity"
+
+
+def make_computation_plan(problem: dict[str, Any], *, mode: str | None = None) -> str:
     problem_id = problem.get("problem_id") or normalize_problem_id(problem["number"])
     statement = problem.get("statement_raw") or problem.get("statement_latex") or ""
     keywords = extract_keywords(statement, limit=12)
+    selected_mode = mode or computation_mode(problem)
     return f"""# Computation Plan for {problem_id}
 
 ## Statement
@@ -2931,6 +2955,7 @@ def make_computation_plan(problem: dict[str, Any]) -> str:
 - tags: {', '.join(problem.get('tags', [])) or 'none'}
 - OEIS: {', '.join(str(item) for item in problem.get('oeis', [])) or 'none'}
 - keywords: {', '.join(keywords)}
+- mode: {selected_mode}
 
 ## Candidate Experiments
 
@@ -2941,8 +2966,8 @@ def make_computation_plan(problem: dict[str, Any]) -> str:
 
 ## Files
 
-- `search.py`: TODO
-- `results.md`: TODO
+- `search.py`: runnable bounded search harness.
+- `results.md`: first deterministic run from the harness.
 
 ## Completion Criteria
 
@@ -2950,6 +2975,274 @@ def make_computation_plan(problem: dict[str, Any]) -> str:
 - Small cases are reproducible.
 - Any counterexample candidate is independently checked.
 """
+
+
+def make_computation_script(problem: dict[str, Any], *, mode: str | None = None) -> str:
+    problem_id = problem.get("problem_id") or normalize_problem_id(problem["number"])
+    selected_mode = mode or computation_mode(problem)
+    max_n = computation_default_max_n(selected_mode)
+    return f'''#!/usr/bin/env python3
+"""Bounded computation harness for {problem_id}.
+
+This script is intentionally small and dependency-free. It is not a proof; it
+produces reproducible small-case data for human review.
+"""
+
+from __future__ import annotations
+
+from itertools import combinations_with_replacement
+import argparse
+
+
+MODE = "{selected_mode}"
+DEFAULT_MAX_N = {max_n}
+
+
+def is_sidon(values: list[int]) -> bool:
+    diffs: set[int] = set()
+    for i, x in enumerate(values):
+        for y in values[:i]:
+            diff = x - y
+            if diff in diffs:
+                return False
+            diffs.add(diff)
+    return True
+
+
+def sidon_max_exact(n: int) -> tuple[int, list[int]]:
+    best: list[int] = []
+
+    def backtrack(start: int, chosen: list[int], diffs: set[int]) -> None:
+        nonlocal best
+        if len(chosen) + (n - start + 1) <= len(best):
+            return
+        if len(chosen) > len(best):
+            best = chosen[:]
+        for x in range(start, n + 1):
+            new_diffs = {{x - y for y in chosen}}
+            if new_diffs & diffs:
+                continue
+            chosen.append(x)
+            backtrack(x + 1, chosen, diffs | new_diffs)
+            chosen.pop()
+
+    backtrack(1, [], set())
+    return len(best), best
+
+
+def is_b3(values: list[int]) -> bool:
+    seen: set[int] = set()
+    for triple in combinations_with_replacement(values, 3):
+        total = sum(triple)
+        if total in seen:
+            return False
+        seen.add(total)
+    return True
+
+
+def b3_max_exact(n: int) -> tuple[int, list[int]]:
+    best: list[int] = []
+
+    def backtrack(start: int, chosen: list[int]) -> None:
+        nonlocal best
+        if len(chosen) + (n - start + 1) <= len(best):
+            return
+        if len(chosen) > len(best):
+            best = chosen[:]
+        for x in range(start, n + 1):
+            candidate = chosen + [x]
+            if not is_b3(candidate):
+                continue
+            backtrack(x + 1, candidate)
+
+    backtrack(1, [])
+    return len(best), best
+
+
+def greedy_sidon(limit: int) -> list[int]:
+    values: list[int] = []
+    x = 1
+    while len(values) < limit:
+        candidate = values + [x]
+        if is_sidon(candidate):
+            values.append(x)
+        x += 1
+    return values
+
+
+def run_table(max_n: int) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    if MODE == "greedy_sidon_prefix":
+        values = greedy_sidon(max_n)
+        checkpoints = [10, 25, 50, 100, 250, 500]
+        rows.append({{"n": "terms", "value": len(values), "witness": values}})
+        for bound in checkpoints:
+            rows.append({{
+                "n": bound,
+                "value": sum(1 for value in values if value <= bound),
+                "witness": [value for value in values if value <= bound],
+            }})
+        return rows
+
+    for n in range(1, max_n + 1):
+        if MODE == "b3_max_exact":
+            value, witness = b3_max_exact(n)
+        else:
+            value, witness = sidon_max_exact(n)
+        rows.append({{"n": n, "value": value, "witness": witness}})
+    return rows
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--max-n", type=int, default=DEFAULT_MAX_N)
+    args = parser.parse_args()
+    print(f"# mode={{MODE}} max_n={{args.max_n}}")
+    for row in run_table(args.max_n):
+        print(f"{{row['n']}}\\t{{row['value']}}\\t{{row['witness']}}")
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+def make_computation_results(problem: dict[str, Any], *, mode: str | None = None) -> str:
+    problem_id = problem.get("problem_id") or normalize_problem_id(problem["number"])
+    selected_mode = mode or computation_mode(problem)
+    max_n = computation_default_max_n(selected_mode)
+    rows = computation_rows(selected_mode, max_n)
+    lines = [
+        f"# Computation Results for {problem_id}",
+        "",
+        f"Generated: {date.today().isoformat()}",
+        f"Mode: `{selected_mode}`",
+        f"Bound: `{max_n}`",
+        "",
+        "This is bounded experimental data, not a proof.",
+        "",
+        "| n | value | witness |",
+        "|---|---:|---|",
+    ]
+    for row in rows:
+        lines.append(f"| {row['n']} | {row['value']} | `{row['witness']}` |")
+    lines.extend(
+        [
+            "",
+            "## Reproduce",
+            "",
+            "```bash",
+            f"python3 computations/{problem_id}/search.py --max-n {max_n}",
+            "```",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def computation_default_max_n(mode: str) -> int:
+    if mode == "b3_max_exact":
+        return 14
+    if mode == "greedy_sidon_prefix":
+        return 64
+    if mode == "sidon_max_exact":
+        return 24
+    return 16
+
+
+def computation_rows(mode: str, max_n: int) -> list[dict[str, Any]]:
+    if mode == "greedy_sidon_prefix":
+        values = greedy_sidon_values(max_n)
+        rows = [{"n": "terms", "value": len(values), "witness": values}]
+        for bound in [10, 25, 50, 100, 250, 500]:
+            rows.append(
+                {
+                    "n": bound,
+                    "value": sum(1 for value in values if value <= bound),
+                    "witness": [value for value in values if value <= bound],
+                }
+            )
+        return rows
+
+    rows = []
+    for n in range(1, max_n + 1):
+        if mode == "b3_max_exact":
+            value, witness = b3_max_exact_values(n)
+        else:
+            value, witness = sidon_max_exact_values(n)
+        rows.append({"n": n, "value": value, "witness": witness})
+    return rows
+
+
+def sidon_max_exact_values(n: int) -> tuple[int, list[int]]:
+    best: list[int] = []
+
+    def backtrack(start: int, chosen: list[int], diffs: set[int]) -> None:
+        nonlocal best
+        if len(chosen) + (n - start + 1) <= len(best):
+            return
+        if len(chosen) > len(best):
+            best = chosen[:]
+        for x in range(start, n + 1):
+            new_diffs = {x - y for y in chosen}
+            if new_diffs & diffs:
+                continue
+            chosen.append(x)
+            backtrack(x + 1, chosen, diffs | new_diffs)
+            chosen.pop()
+
+    backtrack(1, [], set())
+    return len(best), best
+
+
+def b3_max_exact_values(n: int) -> tuple[int, list[int]]:
+    best: list[int] = []
+
+    def backtrack(start: int, chosen: list[int]) -> None:
+        nonlocal best
+        if len(chosen) + (n - start + 1) <= len(best):
+            return
+        if len(chosen) > len(best):
+            best = chosen[:]
+        for x in range(start, n + 1):
+            candidate = chosen + [x]
+            if not is_b3_values(candidate):
+                continue
+            backtrack(x + 1, candidate)
+
+    backtrack(1, [])
+    return len(best), best
+
+
+def is_b3_values(values: list[int]) -> bool:
+    seen: set[int] = set()
+    for triple in combinations_with_replacement(values, 3):
+        total = sum(triple)
+        if total in seen:
+            return False
+        seen.add(total)
+    return True
+
+
+def greedy_sidon_values(limit: int) -> list[int]:
+    values: list[int] = []
+    x = 1
+    while len(values) < limit:
+        candidate = values + [x]
+        if is_sidon_values(candidate):
+            values.append(x)
+        x += 1
+    return values
+
+
+def is_sidon_values(values: list[int]) -> bool:
+    diffs: set[int] = set()
+    for i, x in enumerate(values):
+        for y in values[:i]:
+            diff = x - y
+            if diff in diffs:
+                return False
+            diffs.add(diff)
+    return True
 
 
 def run_statement_auditor_worker(root: Path, problem_id: str | int) -> dict[str, Any]:
